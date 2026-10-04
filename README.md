@@ -100,7 +100,7 @@ standard-output pipes (`ProcessBuilder`). It does not use a TCP listener, named
 pipe server, or network port; command arguments are passed directly without a
 shell.
 
-Requirements: JDK 17+. Build the C++ engine first using the instructions above,
+Requirements: JDK 25+. Build the C++ engine first using the instructions above,
 then run the Java tests or launch the dashboard from the repository root:
 
 ```powershell
