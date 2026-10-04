@@ -1,0 +1,81 @@
+package com.sentinelav.desktop;
+
+import org.junit.jupiter.api.Test;
+
+import java.io.IOException;
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class EngineClientTest {
+    @Test
+    void capturesChildOutputAndExitCode() throws Exception {
+        try (EngineClient client = new EngineClient()) {
+            CountDownLatch completed = new CountDownLatch(1);
+            AtomicReference<String> output = new AtomicReference<>();
+            AtomicReference<Exception> failure = new AtomicReference<>();
+            AtomicInteger exitCode = new AtomicInteger(-1);
+
+            client.start(
+                    List.of("cmd.exe", "/c", "echo sentinel-engine-test"),
+                    output::set,
+                    (code, error) -> {
+                        exitCode.set(code);
+                        failure.set(error);
+                        completed.countDown();
+                    });
+
+            assertTrue(completed.await(10, TimeUnit.SECONDS), "Child process did not complete.");
+            assertEquals(0, exitCode.get());
+            assertNull(failure.get());
+            assertEquals("sentinel-engine-test", output.get().trim());
+        }
+    }
+
+    @Test
+    void rejectsConcurrentEngineOperationAndStopsActiveChild() throws Exception {
+        try (EngineClient client = new EngineClient()) {
+            CountDownLatch completed = new CountDownLatch(1);
+            client.start(
+                    List.of("cmd.exe", "/c", "ping -n 20 127.0.0.1 > nul"),
+                    ignored -> { },
+                    (code, failure) -> completed.countDown());
+
+            assertTrue(client.isRunning(), "Long-running test process should be active.");
+            assertThrows(
+                    IllegalStateException.class,
+                    () -> client.start(
+                            List.of("cmd.exe", "/c", "exit 0"),
+                            ignored -> { },
+                            (code, failure) -> { }));
+
+            client.stop();
+            assertTrue(
+                    completed.await(Duration.ofSeconds(10).toMillis(), TimeUnit.MILLISECONDS),
+                    "Stopped child process did not complete.");
+            assertFalse(client.isRunning());
+        }
+    }
+
+    @Test
+    void reportsMissingExecutableAsStartFailure() {
+        try (EngineClient client = new EngineClient()) {
+            assertThrows(
+                    IOException.class,
+                    () -> client.start(
+                            List.of("sentinel-av-file-that-does-not-exist.exe"),
+                            ignored -> { },
+                            (code, failure) -> { }));
+            assertFalse(client.isRunning());
+        }
+    }
+}

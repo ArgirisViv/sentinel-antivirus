@@ -1,0 +1,404 @@
+#include "sentinel/analysis.hpp"
+#include "sentinel/config.hpp"
+#include "sentinel/hash.hpp"
+#include "sentinel/logging.hpp"
+#include "sentinel/scanner.hpp"
+#include "sentinel/signatures.hpp"
+
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <vector>
+#include <random>
+#include <stdexcept>
+#include <string>
+
+namespace {
+
+class TemporaryDirectory {
+public:
+    TemporaryDirectory() {
+        const auto nonce = std::chrono::steady_clock::now()
+                               .time_since_epoch()
+                               .count();
+        path_ = std::filesystem::temp_directory_path() /
+                ("sentinel-core-tests-" + std::to_string(nonce));
+        std::filesystem::create_directories(path_);
+    }
+
+    ~TemporaryDirectory() {
+        std::error_code error;
+        std::filesystem::remove_all(path_, error);
+    }
+
+    const std::filesystem::path& path() const {
+        return path_;
+    }
+
+private:
+    std::filesystem::path path_;
+};
+
+void require(bool condition, const std::string& message) {
+    if (!condition) {
+        throw std::runtime_error(message);
+    }
+}
+
+void write_text(const std::filesystem::path& path, const std::string& text) {
+    std::ofstream output(path, std::ios::binary);
+    if (!output) {
+        throw std::runtime_error("Cannot create test file: " + path.string());
+    }
+    output << text;
+    if (!output) {
+        throw std::runtime_error("Cannot write test file: " + path.string());
+    }
+}
+
+void write_binary(
+    const std::filesystem::path& path,
+    const std::vector<unsigned char>& bytes) {
+    std::ofstream output(path, std::ios::binary);
+    if (!output) {
+        throw std::runtime_error("Cannot create binary test file: " + path.string());
+    }
+    output.write(
+        reinterpret_cast<const char*>(bytes.data()),
+        static_cast<std::streamsize>(bytes.size()));
+    if (!output) {
+        throw std::runtime_error("Cannot write binary test file: " + path.string());
+    }
+}
+
+void put_u16(
+    std::vector<unsigned char>& bytes,
+    std::size_t offset,
+    std::uint16_t value) {
+    bytes.at(offset) = static_cast<unsigned char>(value & 0xff);
+    bytes.at(offset + 1) = static_cast<unsigned char>((value >> 8) & 0xff);
+}
+
+void put_u32(
+    std::vector<unsigned char>& bytes,
+    std::size_t offset,
+    std::uint32_t value) {
+    bytes.at(offset) = static_cast<unsigned char>(value & 0xff);
+    bytes.at(offset + 1) = static_cast<unsigned char>((value >> 8) & 0xff);
+    bytes.at(offset + 2) = static_cast<unsigned char>((value >> 16) & 0xff);
+    bytes.at(offset + 3) = static_cast<unsigned char>((value >> 24) & 0xff);
+}
+
+template <typename Operation>
+void require_throws(Operation operation, const std::string& message) {
+    try {
+        operation();
+    } catch (const std::exception&) {
+        return;
+    }
+    throw std::runtime_error(message);
+}
+
+void test_sha256_known_vector(const std::filesystem::path& root) {
+    const auto file = root / "known-vector.txt";
+    write_text(file, "abc");
+    require(
+        sentinel::sha256_file(file) ==
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "SHA-256 did not match the known abc vector.");
+}
+
+void test_signature_database(const std::filesystem::path& root) {
+    const auto valid = root / "valid-signatures.txt";
+    write_text(
+        valid,
+        "# safe sample\n"
+        "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD\tfixture\n");
+    const auto signatures = sentinel::load_signatures(valid);
+    require(signatures.size() == 1, "Valid signature database has wrong size.");
+    require(
+        signatures.begin()->first ==
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "Signature hashes should be normalized to lowercase.");
+
+    const auto malformed = root / "malformed-signatures.txt";
+    write_text(malformed, "not a signature\n");
+    require_throws(
+        [&] { sentinel::load_signatures(malformed); },
+        "Malformed signature database was accepted.");
+
+    const auto duplicate = root / "duplicate-signatures.txt";
+    write_text(
+        duplicate,
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\tone\n"
+        "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD\ttwo\n");
+    require_throws(
+        [&] { sentinel::load_signatures(duplicate); },
+        "Duplicate signature was accepted.");
+}
+
+sentinel::SignatureDatabase test_signatures() {
+    return {{
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "safe-test-vector"}};
+}
+
+void test_report_only_scan(const std::filesystem::path& root) {
+    const auto file = root / "report-only.txt";
+    write_text(file, "abc");
+
+    sentinel::ScanOptions options;
+    options.target = file;
+    const auto summary = sentinel::scan_path(options, test_signatures());
+    require(summary.files_scanned == 1, "Report-only scan did not scan one file.");
+    require(summary.threats_detected == 1, "Report-only scan missed its signature.");
+    require(summary.files_quarantined == 0, "Report-only scan quarantined a file.");
+    require(std::filesystem::exists(file), "Report-only scan moved its target.");
+}
+
+void test_quarantine_scan(const std::filesystem::path& root) {
+    const auto target = root / "quarantine-target";
+    const auto quarantine = root / "quarantine";
+    std::filesystem::create_directories(target);
+    const auto file = target / "sample.txt";
+    write_text(file, "abc");
+
+    sentinel::ScanOptions options;
+    options.target = target;
+    options.quarantine_directory = quarantine;
+    options.quarantine_matches = true;
+    const auto summary = sentinel::scan_path(options, test_signatures());
+    require(summary.files_scanned == 1, "Quarantine scan did not scan one file.");
+    require(summary.threats_detected == 1, "Quarantine scan missed its signature.");
+    require(summary.files_quarantined == 1, "Matching file was not quarantined.");
+    require(!std::filesystem::exists(file), "Quarantined source file still exists.");
+    require(
+        std::filesystem::exists(
+            quarantine /
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad_sample.txt"),
+        "Quarantined file was not written to the expected destination.");
+}
+
+void test_quarantine_within_scan_target(const std::filesystem::path& root) {
+    const auto target = root / "target-with-quarantine";
+    const auto quarantine = target / "quarantine";
+    std::filesystem::create_directories(quarantine);
+    write_text(quarantine / "must-not-be-scanned.txt", "abc");
+    write_text(target / "clean.txt", "ordinary text");
+
+    sentinel::ScanOptions options;
+    options.target = target;
+    options.quarantine_directory = quarantine;
+    options.quarantine_matches = true;
+    const auto summary = sentinel::scan_path(options, {});
+    require(summary.files_scanned == 1, "Scanner traversed its own quarantine folder.");
+    require(summary.threats_detected == 0, "Empty database unexpectedly detected a file.");
+}
+
+void test_quarantine_parent_is_rejected(const std::filesystem::path& root) {
+    const auto target = root / "nested" / "scan";
+    std::filesystem::create_directories(target);
+    sentinel::ScanOptions options;
+    options.target = target;
+    options.quarantine_directory = root;
+    options.quarantine_matches = true;
+    require_throws(
+        [&] { sentinel::scan_path(options, {}); },
+        "Quarantine parent of target was accepted.");
+}
+
+void test_entropy_and_suspicious_extensions(const std::filesystem::path& root) {
+    const auto executable = root / "invoice.pdf.exe";
+    write_text(executable, "harmless extension test");
+    const auto extension_analysis = sentinel::analyze_file(executable);
+    require(
+        std::any_of(
+            extension_analysis.findings.begin(),
+            extension_analysis.findings.end(),
+            [](const std::string& finding) {
+                return finding.find("double extension") != std::string::npos;
+            }),
+        "Double-extension heuristic did not report its test fixture.");
+
+    const auto high_entropy = root / "high-entropy.bin";
+    std::vector<unsigned char> bytes(64 * 1024);
+    std::mt19937 generator(0x51A7U);
+    for (auto& byte : bytes) {
+        byte = static_cast<unsigned char>(generator() & 0xff);
+    }
+    write_binary(high_entropy, bytes);
+    const auto entropy_analysis = sentinel::analyze_file(high_entropy);
+    require(entropy_analysis.entropy_available, "Entropy was not calculated.");
+    require(
+        entropy_analysis.entropy_bits_per_byte >= 7.2,
+        "Deterministic high-entropy fixture was below the configured threshold.");
+    require(
+        std::any_of(
+            entropy_analysis.findings.begin(),
+            entropy_analysis.findings.end(),
+            [](const std::string& finding) {
+                return finding.find("high byte entropy") != std::string::npos;
+            }),
+        "High-entropy heuristic did not emit an indicator.");
+}
+
+void test_pe_metadata_and_writable_executable_section(
+    const std::filesystem::path& root) {
+    constexpr std::size_t pe_offset = 0x80;
+    constexpr std::size_t optional_header_size = 0xf0;
+    constexpr std::size_t section_offset = pe_offset + 24 + optional_header_size;
+    std::vector<unsigned char> bytes(section_offset + 40, 0);
+    bytes[0] = 'M';
+    bytes[1] = 'Z';
+    put_u32(bytes, 0x3c, static_cast<std::uint32_t>(pe_offset));
+    bytes[pe_offset] = 'P';
+    bytes[pe_offset + 1] = 'E';
+    put_u16(bytes, pe_offset + 4, 0x8664);
+    put_u16(bytes, pe_offset + 6, 1);
+    put_u16(
+        bytes,
+        pe_offset + 20,
+        static_cast<std::uint16_t>(optional_header_size));
+    put_u16(bytes, pe_offset + 22, 0x0022);
+    put_u16(bytes, pe_offset + 24, 0x020b);
+    bytes[section_offset] = '.';
+    bytes[section_offset + 1] = 't';
+    bytes[section_offset + 2] = 'e';
+    bytes[section_offset + 3] = 'x';
+    bytes[section_offset + 4] = 't';
+    put_u32(bytes, section_offset + 36, 0xa0000000);
+
+    const auto file = root / "metadata-fixture.bin";
+    write_binary(file, bytes);
+    const auto analysis = sentinel::analyze_file(file);
+    require(analysis.is_pe, "MZ/PE fixture was not recognized as a PE image.");
+    require(analysis.valid_pe, "Well-formed minimal PE fixture was rejected.");
+    require(analysis.pe_architecture == "x64", "PE architecture was parsed incorrectly.");
+    require(analysis.pe_section_count == 1, "PE section count was parsed incorrectly.");
+    require(
+        std::any_of(
+            analysis.findings.begin(),
+            analysis.findings.end(),
+            [](const std::string& finding) {
+                return finding.find("writable and executable") != std::string::npos;
+            }),
+        "Writable/executable PE section heuristic did not emit an indicator.");
+}
+
+void test_malformed_pe_is_reported(const std::filesystem::path& root) {
+    std::vector<unsigned char> bytes(64, 0);
+    bytes[0] = 'M';
+    bytes[1] = 'Z';
+    const auto file = root / "malformed.exe";
+    write_binary(file, bytes);
+    const auto analysis = sentinel::analyze_file(file);
+    require(analysis.is_pe, "MZ prefix was not recognized.");
+    require(!analysis.valid_pe, "Truncated PE fixture was accepted as valid.");
+    require(
+        std::any_of(
+            analysis.findings.begin(),
+            analysis.findings.end(),
+            [](const std::string& finding) {
+                return finding.find("malformed") != std::string::npos;
+            }),
+        "Malformed PE header did not emit a static-analysis finding.");
+}
+
+void test_process_location_heuristic() {
+    const auto image = std::filesystem::temp_directory_path() / "sentinel-process-test.exe";
+    const auto findings = sentinel::analyze_process_image_path(image);
+    require(
+        std::any_of(
+            findings.begin(), findings.end(), [](const std::string& finding) {
+                return finding.find("temporary directory") != std::string::npos;
+            }),
+        "Temporary-directory process heuristic did not identify the temp path.");
+}
+
+void test_configuration_file(const std::filesystem::path& root) {
+    const auto config_directory = root / "config";
+    std::filesystem::create_directories(config_directory);
+    const auto config_file = config_directory / "sentinel.ini";
+    write_text(
+        config_file,
+        "# relative paths are based at the config file\n"
+        "signatures = data/signatures.txt\n"
+        "log_file = logs/events.jsonl\n"
+        "quarantine_directory = quarantine\n");
+    const auto config = sentinel::load_engine_config(config_file);
+    require(
+        config.signatures_path == config_directory / "data" / "signatures.txt",
+        "Relative signature path was not resolved against the config file.");
+    require(
+        config.log_path == config_directory / "logs" / "events.jsonl",
+        "Relative log path was not resolved against the config file.");
+    require(
+        config.quarantine_directory == config_directory / "quarantine",
+        "Relative quarantine path was not resolved against the config file.");
+
+    const auto duplicate = config_directory / "duplicate.ini";
+    write_text(duplicate, "log_file = first.jsonl\nlog_file = second.jsonl\n");
+    require_throws(
+        [&] { sentinel::load_engine_config(duplicate); },
+        "Duplicate configuration key was accepted.");
+
+    const auto unknown = config_directory / "unknown.ini";
+    write_text(unknown, "unsupported_option = value\n");
+    require_throws(
+        [&] { sentinel::load_engine_config(unknown); },
+        "Unknown configuration key was accepted.");
+}
+
+void test_structured_event_log(const std::filesystem::path& root) {
+    const auto log_file = root / "logs" / "events.jsonl";
+    {
+        sentinel::Logger logger(log_file);
+        logger.write(
+            "warning",
+            "test_event",
+            "quoted \"value\"\nnext line",
+            root / "sample.txt");
+    }
+
+    std::ifstream input(log_file, std::ios::binary);
+    std::string line;
+    require(static_cast<bool>(std::getline(input, line)), "Event log is empty.");
+    require(line.find("\"severity\":\"warning\"") != std::string::npos,
+            "Structured event severity was not serialized.");
+    require(line.find("\"event\":\"test_event\"") != std::string::npos,
+            "Structured event name was not serialized.");
+    require(
+        line.find("\"message\":\"quoted \\\"value\\\"\\nnext line\"") !=
+            std::string::npos,
+        "Structured event string escaping is invalid.");
+    std::string second_line;
+    require(!std::getline(input, second_line), "A single event wrote multiple JSON lines.");
+}
+
+}
+
+int main() {
+    try {
+        TemporaryDirectory temporary;
+        test_sha256_known_vector(temporary.path());
+        test_signature_database(temporary.path());
+        test_report_only_scan(temporary.path());
+        test_quarantine_scan(temporary.path());
+        test_quarantine_within_scan_target(temporary.path());
+        test_quarantine_parent_is_rejected(temporary.path());
+        test_entropy_and_suspicious_extensions(temporary.path());
+        test_pe_metadata_and_writable_executable_section(temporary.path());
+        test_malformed_pe_is_reported(temporary.path());
+        test_process_location_heuristic();
+        test_configuration_file(temporary.path());
+        test_structured_event_log(temporary.path());
+        std::cout << "All Sentinel AV core tests passed.\n";
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "Test failure: " << error.what() << '\n';
+        return 1;
+    }
+}

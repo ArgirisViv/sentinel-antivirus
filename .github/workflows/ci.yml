@@ -1,0 +1,34 @@
+name: Sentinel AV CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure C++ engine and tests
+        run: cmake -S . -B build -DBUILD_TESTING=ON
+
+      - name: Build C++ engine and tests
+        run: cmake --build build --config Release --parallel
+
+      - name: Run C++ tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: management/pom.xml
+
+      - name: Test JavaFX management application
+        working-directory: management
+        run: .\mvnw.cmd --batch-mode test
