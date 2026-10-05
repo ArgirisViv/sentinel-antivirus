@@ -112,13 +112,35 @@ cd management
 The checked-in Maven Wrapper downloads the pinned Apache Maven distribution on
 first use; no system-wide Maven installation is required.
 
-In the dashboard, choose the C++ executable, signature database, and scan
-target. An optional engine config path can provide logging and default
-quarantine settings. The engine path defaults to `build\Release\sentinel-av.exe` or
-`build\sentinel-av.exe` when present. The dashboard can run one engine command
-at a time, show live output, and keep a short in-memory event history for the
-current session. Monitoring stops when the Stop button is used or the dashboard
-closes; this stops the Sentinel AV child process and does not terminate any
+The dashboard uses a rounded, dark plum-and-navy security-center layout with
+magenta accents, a fixed sidebar, compact top bar, status banner, and six action
+cards. The cards open:
+
+- **Quick scan:** scans the current user's Downloads folder only.
+- **Full scan:** asks you to choose a drive or folder, confirms the selection,
+  then recursively scans that location. Runtime and coverage depend on the
+  selected location and Windows file permissions; this does not promise a
+  complete scan of every volume.
+- **Real-time monitoring:** opens manual folder and process monitoring controls.
+  Monitoring is best-effort and only runs after you start it.
+- **Threat history:** shows engine output and events for the current app
+  session; the Java dashboard does not persist a threat database.
+- **Quarantine:** configures opt-in movement of exact signature matches. The
+  dashboard does not yet provide a quarantine browser, restore, or delete UI.
+- **Process monitor:** opens the process-monitor controls.
+
+Summary counters reflect the current scan/session, not lifetime totals. The
+status banner says the device is ready or shows the current scan/engine state;
+it does not claim that the device is safe or continuously protected. There is
+no always-on protection, signature updater, VPN, firewall, privacy module, or
+support service in this prototype. Engine paths, signatures, and optional
+configuration are in Settings. The engine path defaults to
+`build\Release\sentinel-av.exe` or `build\sentinel-av.exe` when present.
+
+The dashboard can run one engine command at a time, show live output, and keep
+a short in-memory event history for the current session. Monitoring is
+user-started and best-effort; it is not always-on protection. Stop or closing
+the dashboard stops the Sentinel AV child process and does not terminate
 processes being monitored.
 
 The Java EngineClient tests cover child-process output capture, exit codes,
