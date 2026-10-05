@@ -1,0 +1,9 @@
+build
+.git
+.github
+.vscode
+logs
+quarantine
+signatures.txt
+management/target
+

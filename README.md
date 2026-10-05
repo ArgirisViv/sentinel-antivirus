@@ -146,6 +146,31 @@ processes being monitored.
 The Java EngineClient tests cover child-process output capture, exit codes,
 exclusive engine operation, stop requests, and missing-executable errors.
 
+## Docker
+
+The [Dockerfile](Dockerfile) works with the default Linux-container mode of
+Docker Desktop. Because the engine uses Windows APIs, the image cross-compiles
+it to `sentinel-av.exe` with MinGW-w64 and runs it under Wine. The C++ tests run
+during the image build, also under Wine. Wine is an emulation layer, so use the
+image to build, test, and demonstrate the scanner; native Windows remains the
+reference platform. The JavaFX window is a desktop application and is not run in
+a container.
+
+```powershell
+# Build the image (cross-compiles the engine and runs the C++ tests)
+docker build -t sentinel-av .
+
+# Scan a host folder, mounted read-only, with the example signatures
+docker run --rm -v C:\path\to\scan:/data:ro sentinel-av `
+  scan /data --signatures /sentinel/signatures.example.txt
+
+# Run the Java management unit tests (JDK 25)
+docker build --target management-test .
+```
+
+The container scans only files that are mounted into it. It does not see the
+host's files or processes, so process monitoring there is not meaningful.
+
 ## Signature database
 
 The default database path is `signatures.txt`; create it from the example or

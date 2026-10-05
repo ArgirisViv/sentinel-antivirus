@@ -17,6 +17,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EngineClientTest {
+    private static final boolean WINDOWS =
+            System.getProperty("os.name").toLowerCase().contains("win");
+
+    private static List<String> shell(String windowsCommand, String unixCommand) {
+        return WINDOWS
+                ? List.of("cmd.exe", "/c", windowsCommand)
+                : List.of("sh", "-c", unixCommand);
+    }
+
     @Test
     void capturesChildOutputAndExitCode() throws Exception {
         try (EngineClient client = new EngineClient()) {
@@ -26,7 +35,7 @@ class EngineClientTest {
             AtomicInteger exitCode = new AtomicInteger(-1);
 
             client.start(
-                    List.of("cmd.exe", "/c", "echo sentinel-engine-test"),
+                    shell("echo sentinel-engine-test", "echo sentinel-engine-test"),
                     output::set,
                     (code, error) -> {
                         exitCode.set(code);
@@ -46,7 +55,7 @@ class EngineClientTest {
         try (EngineClient client = new EngineClient()) {
             CountDownLatch completed = new CountDownLatch(1);
             client.start(
-                    List.of("cmd.exe", "/c", "ping -n 20 127.0.0.1 > nul"),
+                    shell("ping -n 20 127.0.0.1 > nul", "exec sleep 20"),
                     ignored -> { },
                     (code, failure) -> completed.countDown());
 
@@ -54,7 +63,7 @@ class EngineClientTest {
             assertThrows(
                     IllegalStateException.class,
                     () -> client.start(
-                            List.of("cmd.exe", "/c", "exit 0"),
+                            shell("exit 0", "exit 0"),
                             ignored -> { },
                             (code, failure) -> { }));
 
