@@ -1,0 +1,17 @@
+﻿name: sentinel-av
+
+services:
+  sentinel-monitor:
+    build: .
+    image: sentinel-av:latest
+    container_name: sentinel-monitor
+    # Best-effort, user-started monitoring of the /data volume only.
+    command: ["watch", "/data", "--signatures", "/sentinel/signatures.example.txt"]
+    volumes:
+      # A named volume is used because Docker Desktop does not forward file-change
+      # events from Windows bind mounts into Linux containers.
+      - sentinel-watched:/data
+    restart: unless-stopped
+
+volumes:
+  sentinel-watched:

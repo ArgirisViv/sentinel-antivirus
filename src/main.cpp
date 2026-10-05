@@ -30,6 +30,11 @@ void print_usage(const char* executable) {
 }
 
 int main(int argc, char* argv[]) {
+    // Flush every write so output is visible immediately when stdout is a pipe
+    // (the Java dashboard, `docker logs`).
+    std::cout << std::unitbuf;
+    std::cerr << std::unitbuf;
+
     if (argc < 2 || std::string(argv[1]) == "--help" ||
         std::string(argv[1]) == "-h") {
         print_usage(argv[0]);

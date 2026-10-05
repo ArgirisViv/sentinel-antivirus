@@ -8,6 +8,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <mutex>
@@ -115,10 +116,13 @@ DWORD WINAPI watch_worker(void* context_pointer) {
 
         std::size_t offset = 0;
         while (offset + offsetof(FILE_NOTIFY_INFORMATION, FileName) <= bytes_returned) {
-            const auto* notification = reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(
-                buffer.data() + offset);
             const std::size_t header_size =
                 offsetof(FILE_NOTIFY_INFORMATION, FileName);
+            // Copy the fixed header instead of casting: some implementations
+            // (for example Wine) do not pad records to DWORD alignment.
+            FILE_NOTIFY_INFORMATION record{};
+            std::memcpy(&record, buffer.data() + offset, header_size);
+            const FILE_NOTIFY_INFORMATION* notification = &record;
             if (notification->FileNameLength % sizeof(wchar_t) != 0 ||
                 notification->FileNameLength > bytes_returned - offset - header_size) {
                 failure = "Filesystem notification record was malformed.";
@@ -128,9 +132,11 @@ DWORD WINAPI watch_worker(void* context_pointer) {
             if (notification->Action == FILE_ACTION_ADDED ||
                 notification->Action == FILE_ACTION_MODIFIED ||
                 notification->Action == FILE_ACTION_RENAMED_NEW_NAME) {
-                const std::wstring relative(
-                    notification->FileName,
-                    notification->FileNameLength / sizeof(wchar_t));
+                std::wstring relative(
+                    notification->FileNameLength / sizeof(wchar_t), L'\0');
+                std::memcpy(
+                    relative.data(), buffer.data() + offset + header_size,
+                    notification->FileNameLength);
                 const auto path = (root / std::filesystem::path(relative)).lexically_normal();
                 if (!is_within(path, root)) {
                     failure = "Filesystem notification escaped the watched directory.";
@@ -148,7 +154,6 @@ DWORD WINAPI watch_worker(void* context_pointer) {
             }
             if (notification->NextEntryOffset < header_size +
                     notification->FileNameLength ||
-                notification->NextEntryOffset % alignof(DWORD) != 0 ||
                 notification->NextEntryOffset > bytes_returned - offset) {
                 failure = "Filesystem notification record offset was malformed.";
                 break;

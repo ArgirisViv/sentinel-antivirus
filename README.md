@@ -171,6 +171,25 @@ docker build --target management-test .
 The container scans only files that are mounted into it. It does not see the
 host's files or processes, so process monitoring there is not meaningful.
 
+### Always-running monitor container
+
+`docker compose up -d --build` starts a `sentinel-monitor` container that stays
+visible under **Containers** in Docker Desktop and runs the engine's `watch`
+command on a Docker volume (`/data`). Monitoring is best-effort and covers only
+that volume. Drop a harmless test file in and read the result in the container
+logs:
+
+```powershell
+Set-Content -NoNewline -Path $env:TEMP\safe.txt -Value abc
+docker cp $env:TEMP\safe.txt sentinel-monitor:/data/safe.txt
+docker logs sentinel-monitor
+docker compose down        # stop it (add -v to also delete the volume)
+```
+
+A named volume is used because Docker Desktop does not forward file-change
+events from Windows bind mounts into Linux containers, so files created
+directly in a host folder would not be noticed.
+
 ## Signature database
 
 The default database path is `signatures.txt`; create it from the example or
