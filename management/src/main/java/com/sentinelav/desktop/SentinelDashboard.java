@@ -37,6 +37,8 @@ import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
 import java.io.File;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -62,9 +64,19 @@ public final class SentinelDashboard extends Application {
     private static final Pattern SCAN_SUMMARY = Pattern.compile(
             "Scan complete: (\\d+) file\\(s\\) scanned, (\\d+) detection\\(s\\), "
                     + "(\\d+) suspicious file\\(s\\)");
+    private static final Pattern QUICK_SCAN_SUMMARY = Pattern.compile(
+            "Quick scan complete: (\\d+) location\\(s\\) scanned, "
+                    + "(\\d+) file\\(s\\) scanned, (\\d+) detection\\(s\\), "
+                    + "(\\d+) suspicious file\\(s\\), (\\d+) skipped, "
+                    + "(\\d+) error\\(s\\), highest file risk (\\d+)/100 \\(([^)]+)\\)");
+    private static final Pattern FILE_RISK = Pattern.compile(
+            "\\[RISK\\].*\\| score=(\\d+) \\| severity=([^|]+) \\| "
+                    + "category=([^|]+) \\| confidence=([^|]+)");
 
     private final EngineClient engine = new EngineClient();
     private final ObservableList<String> history = FXCollections.observableArrayList();
+    private final ObservableList<QuarantineItem> quarantinedItems =
+            FXCollections.observableArrayList();
     private final TextField enginePath = new TextField(defaultEnginePath());
     private final TextField configPath = new TextField(defaultConfigPath());
     private final TextField signaturesPath = new TextField(defaultSignaturesPath());
@@ -77,10 +89,12 @@ public final class SentinelDashboard extends Application {
     private final Label filesValue = new Label("—");
     private final Label detectionsValue = new Label("0");
     private final Label suspiciousValue = new Label("0");
+    private final Label riskValue = new Label("No indicators");
     private final Label selectedTarget = new Label("No folder selected");
     private final Label statusDot = new Label("●");
     private final Button stopButton = new Button("Stop");
     private final StackPane pageHost = new StackPane();
+    private ListView<QuarantineItem> quarantineEntries;
     private final Label pageTitle = new Label();
     private final Label pageDescription = new Label();
     private final Label heroStatus = new Label("YOUR DEVICE IS READY");
@@ -91,6 +105,20 @@ public final class SentinelDashboard extends Application {
 
     private Stage stage;
     private boolean stopRequestedByUser;
+    private int highestRiskScoreObserved;
+
+    private record QuarantineItem(
+            String id,
+            String sha256,
+            String threat,
+            String timestamp,
+            String originalPath) {
+        @Override
+        public String toString() {
+            return threat + "  |  " + originalPath + "  |  " + timestamp
+                    + "  |  SHA-256 " + sha256;
+        }
+    }
 
     @Override
     public void start(Stage primaryStage) {
@@ -455,7 +483,7 @@ public final class SentinelDashboard extends Application {
         grid.setMaxHeight(Double.MAX_VALUE);
 
         addActionTile(grid, actionTile(
-                "⌕", "QUICK SCAN", "Scan the Downloads folder",
+                "⌕", "QUICK SCAN", "Scan Downloads, Temp and Startup",
                 "#8e2054", "#ef276c", true, this::quickScan), 0, 0);
         addActionTile(grid, actionTile(
                 "▣", "FULL SCAN", "Choose a folder or drive to scan",
@@ -554,9 +582,9 @@ public final class SentinelDashboard extends Application {
         VBox content = pageContent();
         VBox quick = card("Quick scan");
         quick.getChildren().addAll(
-                styledLabel("Downloads folder", TEXT, 16, true),
+                styledLabel("Downloads, Temp and Startup", TEXT, 16, true),
                 styledLabel(
-                        "Scans files in Downloads only with the configured local SHA-256 signatures.",
+                        "Scans these current-user locations with the configured local SHA-256 signatures.",
                         MUTED, 12, false));
         Button quickButton = primaryButton("Start quick scan");
         registerOperationButton(quickButton);
@@ -596,6 +624,7 @@ public final class SentinelDashboard extends Application {
                 statRow("Files scanned", filesValue),
                 statRow("Signature matches", detectionsValue),
                 statRow("Suspicious indicators", suspiciousValue),
+                statRow("Highest file risk (not a probability)", riskValue),
                 statRow("Selected location", selectedTarget));
         content.getChildren().addAll(quick, full, custom, result);
         return content;
@@ -635,7 +664,10 @@ public final class SentinelDashboard extends Application {
         Button monitor = primaryButton("Start process monitoring");
         registerOperationButton(monitor);
         monitor.setOnAction(event -> runProcessMonitor());
-        processes.getChildren().add(monitor);
+        Button tree = secondaryButton("Show process tree snapshot");
+        registerOperationButton(tree);
+        tree.setOnAction(event -> showProcessTree());
+        processes.getChildren().addAll(monitor, tree);
 
         if (processesOnly) {
             content.getChildren().addAll(note, processes);
@@ -659,7 +691,7 @@ public final class SentinelDashboard extends Application {
 
         HBox destination = new HBox(10, destinationPath, browse);
         Label limitation = styledLabel(
-                "Quarantine is off by default. Only exact SHA-256 signature matches are moved; heuristic indicators are never quarantined. This interface configures the destination but does not provide restore or delete controls.",
+                "Quarantine is off by default. Only exact SHA-256 signature matches are moved; heuristic indicators are never quarantined. Restoring returns the item to its original path and never overwrites an existing file.",
                 MUTED, 11, false);
         limitation.setWrapText(true);
         quarantine.getChildren().addAll(
@@ -667,7 +699,38 @@ public final class SentinelDashboard extends Application {
                 limitation,
                 quarantineEnabled,
                 destination);
-        content.getChildren().add(quarantine);
+
+        VBox historyCard = card("Quarantine history");
+        quarantineEntries = new ListView<>(quarantinedItems);
+        quarantineEntries.setPlaceholder(styledLabel(
+                "No quarantine entries loaded.", MUTED, 11, false));
+        quarantineEntries.setPrefHeight(250);
+        quarantineEntries.setCellFactory(view -> new ListCell<>() {
+            @Override
+            protected void updateItem(QuarantineItem item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty ? null : item.toString());
+                setWrapText(true);
+                setMaxWidth(Double.MAX_VALUE);
+                setStyle(
+                        "-fx-background-color: #171426; -fx-text-fill: " + TEXT + ";"
+                                + "-fx-padding: 8 4 8 4; -fx-font-size: 10px;");
+            }
+        });
+        Button refresh = secondaryButton("Refresh history");
+        registerOperationButton(refresh);
+        refresh.setOnAction(event -> refreshQuarantine());
+        Button restore = primaryButton("Restore selected item");
+        registerOperationButton(restore);
+        restore.setOnAction(event -> restoreSelectedQuarantineItem());
+        HBox actions = new HBox(10, refresh, restore);
+        historyCard.getChildren().addAll(
+                styledLabel(
+                        "Metadata is stored locally beside isolated files. The engine verifies the stored SHA-256 and refuses to overwrite the original destination.",
+                        MUTED, 11, false),
+                quarantineEntries,
+                actions);
+        content.getChildren().addAll(quarantine, historyCard);
         return content;
     }
 
@@ -844,13 +907,18 @@ public final class SentinelDashboard extends Application {
     }
 
     private void quickScan() {
-        Path downloads = Path.of(System.getProperty("user.home"), "Downloads");
-        if (!Files.isDirectory(downloads)) {
-            addHistory("ERROR", "Downloads folder not found. Choose a folder in Custom scan.");
-            showPage("Scan");
+        List<String> arguments = baseCommand("quick-scan", null);
+        if (arguments == null || !appendQuarantineOption(arguments)) {
             return;
         }
-        startPathCommand("scan", downloads);
+        selectedTarget.setText("Downloads + Temp + Startup (current user)");
+        filesValue.setText("—");
+        detectionsValue.setText("0");
+        suspiciousValue.setText("0");
+        highestRiskScoreObserved = 0;
+        riskValue.setText("No indicators observed (not a safety verdict)");
+        startEngine(arguments, "Quick scan");
+        showPage("Scanner");
     }
 
     private void chooseAndRunFullScan() {
@@ -916,31 +984,15 @@ public final class SentinelDashboard extends Application {
     private void startPathCommand(String command, Path target) {
         Path normalized = target.toAbsolutePath().normalize();
         List<String> arguments = baseCommand(command, normalized.toString());
-        if (arguments == null) {
+        if (arguments == null || !appendQuarantineOption(arguments)) {
             return;
-        }
-        if (quarantineEnabled.isSelected()) {
-            String destination = quarantinePath.getText().trim();
-            if (destination.isEmpty() && configPath.getText().isBlank()) {
-                addHistory("ERROR", "Set a quarantine folder in Settings or turn quarantine off.");
-                showPage("Settings");
-                return;
-            }
-            arguments.add("--quarantine");
-            if (!destination.isEmpty()) {
-                try {
-                    arguments.add(Path.of(destination).toAbsolutePath().normalize().toString());
-                } catch (RuntimeException error) {
-                    addHistory("ERROR", "Invalid quarantine path: " + error.getMessage());
-                    showPage("Settings");
-                    return;
-                }
-            }
         }
         selectedTarget.setText(normalized.toString());
         filesValue.setText("—");
         detectionsValue.setText("0");
         suspiciousValue.setText("0");
+        highestRiskScoreObserved = 0;
+        riskValue.setText("No indicators observed (not a safety verdict)");
         startEngine(arguments, command.equals("scan") ? "Scanning" : "Monitoring");
         if (command.equals("scan")) {
             showPage("Scan");
@@ -949,11 +1001,98 @@ public final class SentinelDashboard extends Application {
         }
     }
 
+    private boolean appendQuarantineOption(List<String> arguments) {
+        if (quarantineEnabled.isSelected()) {
+            String destination = quarantinePath.getText().trim();
+            if (destination.isEmpty() && configPath.getText().isBlank()) {
+                addHistory("ERROR", "Set a quarantine folder in Settings or turn quarantine off.");
+                showPage("Settings");
+                return false;
+            }
+            arguments.add("--quarantine");
+            if (!destination.isEmpty()) {
+                try {
+                    arguments.add(Path.of(destination).toAbsolutePath().normalize().toString());
+                } catch (RuntimeException error) {
+                    addHistory("ERROR", "Invalid quarantine path: " + error.getMessage());
+                    showPage("Settings");
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     private void runProcessMonitor() {
         List<String> arguments = baseCommand("processes", null);
         if (arguments != null) {
             startEngine(arguments, "Monitoring processes");
         }
+    }
+
+    private void showProcessTree() {
+        List<String> arguments = baseCommand("process-tree", null);
+        if (arguments != null) {
+            startEngine(arguments, "Process tree snapshot");
+            showPage("Threats");
+        }
+    }
+
+    private void refreshQuarantine() {
+        List<String> arguments = baseCommand("quarantine", null);
+        if (arguments == null) {
+            return;
+        }
+        arguments.add(2, "list");
+        if (!appendQuarantineDirectory(arguments)) {
+            return;
+        }
+        quarantinedItems.clear();
+        startEngine(arguments, "Loading quarantine history");
+    }
+
+    private void restoreSelectedQuarantineItem() {
+        QuarantineItem selected =
+                quarantineEntries == null ? null : quarantineEntries.getSelectionModel().getSelectedItem();
+        if (selected == null) {
+            addHistory("ERROR", "Select a quarantine entry before restoring.");
+            return;
+        }
+        Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION);
+        confirmation.setTitle("Restore quarantined item");
+        confirmation.setHeaderText("Restore the selected file to its original path?");
+        confirmation.setContentText(
+                selected.originalPath()
+                        + "\n\nThe operation verifies the stored SHA-256 and refuses to overwrite an existing file.");
+        confirmation.getButtonTypes().setAll(ButtonType.OK, ButtonType.CANCEL);
+        if (confirmation.showAndWait().filter(ButtonType.OK::equals).isEmpty()) {
+            return;
+        }
+
+        List<String> arguments = baseCommand("quarantine", null);
+        if (arguments == null) {
+            return;
+        }
+        arguments.add(2, "restore");
+        arguments.add(3, selected.id());
+        if (!appendQuarantineDirectory(arguments)) {
+            return;
+        }
+        startEngine(arguments, "Restoring quarantine");
+    }
+
+    private boolean appendQuarantineDirectory(List<String> arguments) {
+        String configuredDirectory = quarantinePath.getText().trim();
+        if (!configuredDirectory.isEmpty()) {
+            try {
+                arguments.add("--quarantine-dir");
+                arguments.add(Path.of(configuredDirectory).toAbsolutePath().normalize().toString());
+            } catch (RuntimeException error) {
+                addHistory("ERROR", "Invalid quarantine path: " + error.getMessage());
+                return false;
+            }
+        }
+        return true;
     }
 
     private List<String> baseCommand(String command, String target) {
@@ -1048,6 +1187,9 @@ public final class SentinelDashboard extends Application {
                         } else if (exitCode == 0) {
                             modeValue.setText("Complete");
                             addHistory("INFO", "Engine operation completed.");
+                            if ("Restoring quarantine".equals(mode)) {
+                                refreshQuarantine();
+                            }
                         } else {
                             modeValue.setText("Error");
                             addHistory("ERROR", "Engine exited with code " + exitCode + ".");
@@ -1083,13 +1225,29 @@ public final class SentinelDashboard extends Application {
                 heroStatus.setText("SCAN IN PROGRESS");
                 statusDescription.setText("Sentinel is checking the selected location against local signatures.");
             }
+            case "Quick scan" -> {
+                heroStatus.setText("QUICK SCAN IN PROGRESS");
+                statusDescription.setText("Checking the current user's Downloads, temporary, and Startup folders.");
+            }
             case "Monitoring", "Monitoring processes" -> {
                 heroStatus.setText("MONITORING RUNNING");
                 statusDescription.setText("User-started monitoring is active; it is best-effort and may miss events.");
             }
+            case "Process tree snapshot" -> {
+                heroStatus.setText("PROCESS SNAPSHOT");
+                statusDescription.setText("A point-in-time process ancestry view is being collected.");
+            }
+            case "Loading quarantine history" -> {
+                heroStatus.setText("LOADING QUARANTINE");
+                statusDescription.setText("Reading local quarantine metadata.");
+            }
+            case "Restoring quarantine" -> {
+                heroStatus.setText("RESTORING FILE");
+                statusDescription.setText("Restoring the selected file only if the original path is still free.");
+            }
             case "Complete" -> {
-                heroStatus.setText("SCAN COMPLETE");
-                statusDescription.setText("Review the session results and signature matches below.");
+                heroStatus.setText("OPERATION COMPLETE");
+                statusDescription.setText("Review the operation output and local history.");
             }
             case "Stopped", "Stopping" -> {
                 heroStatus.setText("OPERATION STOPPED");
@@ -1110,7 +1268,31 @@ public final class SentinelDashboard extends Application {
     private void receiveOutput(String line) {
         Platform.runLater(() -> {
             appendActivity(line);
-            if (line.contains("[DETECTED]")) {
+            Matcher riskMatcher = FILE_RISK.matcher(line);
+            if (riskMatcher.find()) {
+                int score = Integer.parseInt(riskMatcher.group(1));
+                if (score > highestRiskScoreObserved) {
+                    highestRiskScoreObserved = score;
+                    riskValue.setText(
+                            score + " / 100 — "
+                                    + riskMatcher.group(2).trim() + " — "
+                                    + riskMatcher.group(3).trim());
+                }
+                addHistory(
+                        "RISK",
+                        riskMatcher.group(2).trim() + " "
+                                + riskMatcher.group(1) + "/100 — "
+                                + riskMatcher.group(3).trim());
+            }
+            if (line.startsWith("QUARANTINE_ENTRY\t")) {
+                try {
+                    quarantinedItems.add(parseQuarantineEntry(line));
+                } catch (IllegalArgumentException error) {
+                    addHistory("ERROR", "Invalid quarantine history entry: " + error.getMessage());
+                }
+            } else if (line.equals("QUARANTINE_EMPTY")) {
+                quarantinedItems.clear();
+            } else if (line.contains("[DETECTED]")) {
                 detectionsValue.setText(
                         Integer.toString(Integer.parseInt(detectionsValue.getText()) + 1));
                 addHistory("DETECTION", line);
@@ -1120,18 +1302,60 @@ public final class SentinelDashboard extends Application {
                 addHistory("SUSPICIOUS", line);
             } else if (line.contains("[PROCESS START]")) {
                 addHistory("PROCESS", line);
+            } else if (line.startsWith("[PROCESS TREE]")) {
+                addHistory("PROCESS TREE", line);
+            } else if (line.startsWith("[RANSOMWARE-LIKE ACTIVITY]")) {
+                addHistory("RANSOMWARE ALERT", line);
             } else if (line.startsWith("[ERROR]") || line.startsWith("[FATAL]")) {
                 addHistory("ERROR", line);
             } else {
-                Matcher matcher = SCAN_SUMMARY.matcher(line);
-                if (matcher.find()) {
-                    filesValue.setText(matcher.group(1));
-                    detectionsValue.setText(matcher.group(2));
-                    suspiciousValue.setText(matcher.group(3));
-                    addHistory("SCAN", line);
+                Matcher quickMatcher = QUICK_SCAN_SUMMARY.matcher(line);
+                if (quickMatcher.find()) {
+                    filesValue.setText(quickMatcher.group(2));
+                    detectionsValue.setText(quickMatcher.group(3));
+                    suspiciousValue.setText(quickMatcher.group(4));
+                    int score = Integer.parseInt(quickMatcher.group(7));
+                    if (score == 0) {
+                        riskValue.setText("No indicators observed (not a safety verdict)");
+                    } else if (score >= highestRiskScoreObserved) {
+                        highestRiskScoreObserved = score;
+                        riskValue.setText(
+                                score + " / 100 — " + quickMatcher.group(8));
+                    }
+                    addHistory(
+                            "QUICK SCAN",
+                            quickMatcher.group(1) + " location(s), "
+                                    + quickMatcher.group(2) + " file(s), "
+                                    + quickMatcher.group(5) + " skipped, "
+                                    + quickMatcher.group(6) + " error(s).");
+                } else {
+                    Matcher matcher = SCAN_SUMMARY.matcher(line);
+                    if (matcher.find()) {
+                        filesValue.setText(matcher.group(1));
+                        detectionsValue.setText(matcher.group(2));
+                        suspiciousValue.setText(matcher.group(3));
+                        addHistory("SCAN", line);
+                    }
                 }
             }
         });
+    }
+
+    private static QuarantineItem parseQuarantineEntry(String line) {
+        String[] fields = line.split("\t", -1);
+        if (fields.length != 6 || !"QUARANTINE_ENTRY".equals(fields[0])) {
+            throw new IllegalArgumentException("unexpected record shape");
+        }
+        return new QuarantineItem(
+                decodeQuarantineField(fields[1]),
+                decodeQuarantineField(fields[2]),
+                decodeQuarantineField(fields[3]),
+                decodeQuarantineField(fields[4]),
+                decodeQuarantineField(fields[5]));
+    }
+
+    private static String decodeQuarantineField(String value) {
+        return URLDecoder.decode(value, StandardCharsets.UTF_8);
     }
 
     private void appendActivity(String line) {

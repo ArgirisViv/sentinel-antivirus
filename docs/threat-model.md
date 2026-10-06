@@ -35,17 +35,18 @@ protect a system.
 | Threat | Current mitigation | Remaining limitation |
 |---|---|---|
 | Malformed signatures or configuration cause unexpected parsing | Strict field/hash format, duplicate and unknown keys rejected | Configuration and signature authenticity are not verified |
-| A signature match is silently moved | Quarantine is opt-in; only exact SHA-256 matches trigger it | Same-volume rename can fail; no encrypted storage or restore workflow |
+| A signature match is silently moved | Quarantine is opt-in; only exact SHA-256 matches trigger it; local metadata records hash, label, source, and timestamp | Metadata is not cryptographically authenticated; same-volume rename can fail; restore is local and not a malware-cleaning action |
 | Other local users read newly quarantined files | New quarantine directories and moved files receive protected ACLs for the current user, SYSTEM, and Administrators | Existing quarantine directory ACLs are not changed; verify the warning and filesystem support |
-| Heuristic false positives are treated as confirmed malware | Heuristic output uses separate `SUSPICIOUS` indicators and never auto-quarantines | Entropy, file extensions, and PE flags can produce benign findings |
+| Heuristic false positives are treated as confirmed malware | Heuristic output uses separate `SUSPICIOUS` indicators and transparent rule-based risk scores; heuristics never auto-quarantine | Scores are prioritization only, not probabilities; entropy, file extensions, and PE flags can produce benign findings |
 | IPC exposes a network service | UI launches a local child and uses process streams; no listener is created | Local administrators or the same user can still inspect/control their processes |
 | Event data is lost or log growth is unbounded | Synchronous writes surface failures; one 10 MiB log and one backup are kept | No tamper-evident chain, remote collector, or guaranteed durability after power loss |
-| Real-time event is missed | Watcher reports buffer overflow and asks for a full scan | Filesystem watcher is best-effort; process polling misses short-lived processes |
+| Real-time event is missed | Watcher reports buffer overflow and asks for a full scan; observed bursts of 32 distinct paths within 10 seconds produce an alert | Filesystem watcher is best-effort; alert has no process attribution or response; process polling misses short-lived processes |
 | Crafted PE headers cause out-of-bounds parsing | Parser bounds-checks offsets and reads metadata only | PE parser has not received external fuzzing or broad corpus validation |
 
 ## Out of scope
 
 - Kernel-level protection or blocking execution
+- Process-attributed ransomware prevention or file rollback
 - Credential theft, privilege escalation, or persistence detection
 - Network monitoring or remote management
 - Authenticated signature updates and rollback protection

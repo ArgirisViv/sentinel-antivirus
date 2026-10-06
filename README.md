@@ -41,6 +41,19 @@ duplicate keys are errors. Command-line `--signatures` and `--log` values
 override the configuration. `--quarantine [directory]` remains opt-in; without
 a directory argument it uses `quarantine_directory` from the config.
 
+Quick Scan checks the current user's Downloads folder, temporary directory,
+and Startup folder:
+
+```powershell
+.\build\Release\sentinel-av.exe quick-scan `
+  --signatures .\signatures.example.txt
+```
+
+Missing optional locations are reported as skipped; discovery or access errors
+are reported in the summary and produce a nonzero exit status. Quick Scan does
+not scan all of AppData or active process images. As with other scans, it only
+reports detections unless exact-signature quarantine is explicitly enabled.
+
 When `log_file` is configured, the engine appends structured JSON Lines events
 with UTC timestamps, severity, event name, message, and path. The active log is
 rotated at 10 MiB, keeping one `.1` backup. Log write failures are reported
@@ -84,13 +97,46 @@ to protected or elevated processes; these are reported and their image scan is
 skipped. This polling approach can miss very short-lived processes. It reports
 detections only and does not terminate processes.
 
+To inspect the current process ancestry as a point-in-time snapshot:
+
+```powershell
+.\build\Release\sentinel-av.exe process-tree `
+  --config .\config.example.ini
+```
+
+The process tree shows PID, parent PID, and executable name. It is an
+unprivileged snapshot, not continuous telemetry; it does not inspect memory,
+network activity, loaded DLLs, or terminate processes.
+
 Quarantine uses a same-volume rename and does not execute or inspect files
 behaviorally. On Windows, newly-created quarantine directories and quarantined
 files receive protected ACLs for the current user, LocalSystem, and local
 Administrators. Existing quarantine-directory ACLs are not modified and trigger
 a warning; verify them before use. The directory must not be the scan target or
 one of its parents. Use a quarantine directory on the same volume as the file
-being moved. Review its contents before restoring or deleting files.
+being moved. Each moved item receives local metadata containing its SHA-256,
+signature label, original path, and UTC timestamp. The Java dashboard can list
+these entries and restore a selected item. Restore refuses to overwrite an
+existing path and requires the original parent directory to remain available.
+The content hash is rechecked before restore. The metadata is local and is not
+cryptographically authenticated; protect the quarantine directory and review
+the source before restoring.
+
+Quarantine history can also be inspected or restored from the CLI:
+
+```powershell
+.\build\Release\sentinel-av.exe quarantine list `
+  --config .\config.example.ini
+.\build\Release\sentinel-av.exe quarantine restore <id> `
+  --config .\config.example.ini
+```
+
+During manual folder monitoring, Sentinel reports a ransomware-like burst
+alert when 32 distinct observed file paths change within 10 seconds. This is a
+coarse, alert-only heuristic: it cannot attribute writes to a process, may
+produce false positives, and does not stop the process or roll back files.
+Filesystem notifications can be missed or overflow; this is not ransomware
+prevention.
 
 ## JavaFX management dashboard
 
@@ -116,7 +162,9 @@ The dashboard uses a rounded, dark plum-and-navy security-center layout with
 magenta accents, a fixed sidebar, compact top bar, status banner, and six action
 cards. The cards open:
 
-- **Quick scan:** scans the current user's Downloads folder only.
+- **Quick scan:** scans the current user's Downloads, temporary, and Startup
+  folders. Missing locations are skipped and reported; inaccessible locations
+  produce errors. It does not scan all of AppData or active process images.
 - **Full scan:** asks you to choose a drive or folder, confirms the selection,
   then recursively scans that location. Runtime and coverage depend on the
   selected location and Windows file permissions; this does not promise a
@@ -126,7 +174,8 @@ cards. The cards open:
 - **Threat history:** shows engine output and events for the current app
   session; the Java dashboard does not persist a threat database.
 - **Quarantine:** configures opt-in movement of exact signature matches. The
-  dashboard does not yet provide a quarantine browser, restore, or delete UI.
+  dashboard provides local history and a restore action; it does not delete
+  quarantined files.
 - **Process monitor:** opens the process-monitor controls.
 
 Summary counters reflect the current scan/session, not lifetime totals. The
@@ -237,6 +286,25 @@ scripts, installers, compressed, or encrypted files. PE parsing reads metadata
 only; files are never loaded or executed by the analyzer. This is not behavioral
 analysis and does not establish that a file is malicious.
 
+## Explainable risk classification
+
+Files with configured indicators emit a `[RISK]` record containing an integer
+score, severity, broad evidence category, confidence basis, and the reasons
+that contributed. The score is a **rule-based prioritization value, not a
+probability or a claim that a file is malware**. Correlated findings in the
+same category contribute only their strongest weight; distinct categories can
+combine. Current weights are: active-content extension (5), high entropy (15),
+executable masquerading (25), suspicious PE structure (up to 30), a
+PE-like extension on a non-PE file (35), and malformed PE headers (45),
+capped at 99.
+
+Heuristic severities are `LOW` (1–19), `MEDIUM` (20–39), `HIGH` (40–69), and
+`CRITICAL` (70–99). A score of 0 means only that no configured indicator fired;
+it is not a safety verdict. An exact hash hit is separately reported as
+`SIGNATURE_MATCH` with score 100. It means only that the hash matches the
+configured local database; database contents and labels are not independently
+authenticated, and are not verified malware-family or cloud-reputation data.
+
 ## Current scope
 
 - Recursive file traversal without following symbolic links
@@ -244,7 +312,11 @@ analysis and does not establish that a file is malicious.
 - Strict local hash-signature database
 - Detection reporting and opt-in quarantine by rename
 - Recursive real-time monitoring of added, modified, and renamed-in files
+- Alert-only ransomware-like burst heuristic for 32 distinct observed paths
+  within 10 seconds (no process attribution, blocking, or rollback)
 - Process-start monitoring and executable signature scans
+- Point-in-time process ancestry snapshot
+- Local quarantine metadata, history listing, and no-overwrite restore
 - Static entropy, extension, and PE metadata indicators
 - Strict key/value engine configuration with config-relative paths
 - Structured, rotating JSONL event logging
@@ -253,5 +325,8 @@ analysis and does not establish that a file is malicious.
 - Local parent/child pipe communication without a network listener
 - Non-zero exit status on scan errors or invalid invocation
 
-A Windows service, signature updates, stronger process telemetry, and deeper
-behavioral analysis are planned for later phases and are not implemented.
+A Windows service, kernel minifilter, pre-execution blocking, authenticated
+signature updates, process-attributed behavior, network/web protection,
+cloud reputation, ML, and rollback are not implemented. Sentinel remains an
+educational local prototype, not a replacement for Windows Security or a
+production antivirus.

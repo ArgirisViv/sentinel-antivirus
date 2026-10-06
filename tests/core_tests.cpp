@@ -1,7 +1,9 @@
 #include "sentinel/analysis.hpp"
+#include "sentinel/behavior.hpp"
 #include "sentinel/config.hpp"
 #include "sentinel/hash.hpp"
 #include "sentinel/logging.hpp"
+#include "sentinel/quick_scan.hpp"
 #include "sentinel/scanner.hpp"
 #include "sentinel/signatures.hpp"
 
@@ -111,6 +113,37 @@ void test_sha256_known_vector(const std::filesystem::path& root) {
         "SHA-256 did not match the known abc vector.");
 }
 
+void test_file_change_burst_detection(const std::filesystem::path& root) {
+    sentinel::FileChangeBurstDetector detector;
+    const auto start = sentinel::FileChangeBurstDetector::Clock::time_point{};
+    require(
+        !detector.observe(root / "one.txt", start),
+        "Ransomware-like activity triggered below the threshold.");
+    require(
+        !detector.observe(root / "one.txt", start + std::chrono::seconds(1)),
+        "A repeated change was incorrectly counted as a distinct file.");
+
+    bool alerted = false;
+    for (std::size_t index = 1;
+         index < sentinel::FileChangeBurstDetector::minimum_distinct_files;
+         ++index) {
+        alerted = detector.observe(
+            root / ("file-" + std::to_string(index) + ".txt"),
+            start + std::chrono::seconds(2));
+    }
+    require(alerted, "High-volume file-change burst was not detected.");
+    require(
+        !detector.observe(root / "additional.txt", start + std::chrono::seconds(3)),
+        "The same continuous burst emitted duplicate alerts.");
+
+    require(
+        !detector.observe(
+            root / "after-window.txt",
+            start + sentinel::FileChangeBurstDetector::observation_window +
+                std::chrono::seconds(3)),
+        "Expired changes were retained in the burst window.");
+}
+
 void test_signature_database(const std::filesystem::path& root) {
     const auto valid = root / "valid-signatures.txt";
     write_text(
@@ -155,8 +188,46 @@ void test_report_only_scan(const std::filesystem::path& root) {
     const auto summary = sentinel::scan_path(options, test_signatures());
     require(summary.files_scanned == 1, "Report-only scan did not scan one file.");
     require(summary.threats_detected == 1, "Report-only scan missed its signature.");
+    require(
+        summary.highest_risk_score == 100 &&
+            summary.highest_risk_severity == "SIGNATURE_MATCH",
+        "Exact local signature match was not reflected in scan risk summary.");
     require(summary.files_quarantined == 0, "Report-only scan quarantined a file.");
     require(std::filesystem::exists(file), "Report-only scan moved its target.");
+}
+
+void test_quick_scan_aggregates_and_deduplicates_locations(
+    const std::filesystem::path& root) {
+    const auto downloads = root / "quick-downloads";
+    const auto temporary = root / "quick-temp";
+    std::filesystem::create_directories(downloads);
+    std::filesystem::create_directories(temporary);
+    write_text(downloads / "match.txt", "abc");
+    write_text(temporary / "ordinary.txt", "ordinary content");
+
+    sentinel::ScanOptions options;
+    const auto summary = sentinel::scan_quick_locations(
+        {
+            {"Downloads", downloads},
+            {"Temp", temporary},
+            {"Duplicate Downloads", downloads / "."},
+            {"Missing Startup", root / "missing-startup"} },
+        options,
+        test_signatures());
+    require(summary.locations_scanned == 2,
+            "Quick scan did not scan each existing unique location.");
+    require(summary.locations_skipped == 2,
+            "Quick scan did not report missing and duplicate locations as skipped.");
+    require(summary.scan.files_scanned == 2,
+            "Quick scan did not aggregate file totals across locations.");
+    require(summary.scan.threats_detected == 1,
+            "Quick scan did not aggregate signature matches.");
+    require(summary.scan.errors == 0,
+            "Quick scan reported an error for an absent optional location.");
+    require(
+        summary.scan.highest_risk_score == 100 &&
+            summary.scan.highest_risk_severity == "SIGNATURE_MATCH",
+        "Quick scan did not aggregate the highest risk assessment.");
 }
 
 void test_quarantine_scan(const std::filesystem::path& root) {
@@ -175,11 +246,95 @@ void test_quarantine_scan(const std::filesystem::path& root) {
     require(summary.threats_detected == 1, "Quarantine scan missed its signature.");
     require(summary.files_quarantined == 1, "Matching file was not quarantined.");
     require(!std::filesystem::exists(file), "Quarantined source file still exists.");
+    const auto entries = sentinel::list_quarantine(quarantine);
+    require(entries.size() == 1, "Quarantine history did not list the moved file.");
     require(
-        std::filesystem::exists(
-            quarantine /
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad_sample.txt"),
+        entries.front().original_path == std::filesystem::weakly_canonical(file),
+        "Quarantine history did not retain the original path.");
+    require(
+        entries.front().sha256 ==
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "Quarantine history did not retain the SHA-256.");
+    require(
+        entries.front().threat == "safe-test-vector",
+        "Quarantine history did not retain the threat label.");
+    require(
+        std::filesystem::exists(entries.front().quarantined_path),
         "Quarantined file was not written to the expected destination.");
+    require(
+        sentinel::format_quarantine_entry(entries.front()).rfind(
+            "QUARANTINE_ENTRY\t", 0) == 0,
+        "Quarantine CLI record did not have its documented prefix.");
+
+    const auto restored = sentinel::restore_quarantined_file(
+        quarantine, entries.front().id);
+    require(restored.original_path == entries.front().original_path,
+            "Restore returned the wrong original path.");
+    require(std::filesystem::exists(file), "Quarantined file was not restored.");
+    require(sentinel::sha256_file(file) ==
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            "Restored file contents changed.");
+    require(
+        sentinel::list_quarantine(quarantine).empty(),
+        "Restored item remained in quarantine history.");
+    require(
+        sentinel::list_quarantine(root / "not-created").empty(),
+        "An uncreated quarantine location should have empty history.");
+}
+
+void test_quarantine_restore_never_overwrites(const std::filesystem::path& root) {
+    const auto target = root / "restore-overwrite-target";
+    const auto quarantine = root / "restore-overwrite-quarantine";
+    std::filesystem::create_directories(target);
+    const auto file = target / "sample.txt";
+    write_text(file, "abc");
+
+    sentinel::ScanOptions options;
+    options.target = file;
+    options.quarantine_directory = quarantine;
+    options.quarantine_matches = true;
+    const auto summary = sentinel::scan_path(options, test_signatures());
+    require(summary.files_quarantined == 1,
+            "Test fixture was not moved into quarantine.");
+    const auto entries = sentinel::list_quarantine(quarantine);
+    write_text(file, "user data");
+    require_throws(
+        [&] { sentinel::restore_quarantined_file(quarantine, entries.front().id); },
+        "Restore overwrote a file created at the original path.");
+    require(
+        std::filesystem::exists(entries.front().quarantined_path),
+        "Failed restore removed the quarantined original.");
+    std::ifstream original(file, std::ios::binary);
+    std::string content;
+    std::getline(original, content);
+    require(content == "user data", "Failed restore modified the existing file.");
+}
+
+void test_quarantine_restore_checks_integrity(const std::filesystem::path& root) {
+    const auto target = root / "restore-integrity-target";
+    const auto quarantine = root / "restore-integrity-quarantine";
+    std::filesystem::create_directories(target);
+    const auto file = target / "sample.txt";
+    write_text(file, "abc");
+
+    sentinel::ScanOptions options;
+    options.target = file;
+    options.quarantine_directory = quarantine;
+    options.quarantine_matches = true;
+    require(
+        sentinel::scan_path(options, test_signatures()).files_quarantined == 1,
+        "Integrity fixture was not moved into quarantine.");
+    const auto entries = sentinel::list_quarantine(quarantine);
+    write_text(entries.front().quarantined_path, "modified after quarantine");
+    require_throws(
+        [&] {
+            sentinel::restore_quarantined_file(quarantine, entries.front().id);
+        },
+        "Restore accepted a quarantined file whose contents changed.");
+    require(
+        !std::filesystem::exists(file) &&
+            std::filesystem::exists(entries.front().quarantined_path),
+        "Integrity failure did not leave the file isolated in quarantine.");
 }
 
 void test_quarantine_within_scan_target(const std::filesystem::path& root) {
@@ -222,6 +377,14 @@ void test_entropy_and_suspicious_extensions(const std::filesystem::path& root) {
                 return finding.find("double extension") != std::string::npos;
             }),
         "Double-extension heuristic did not report its test fixture.");
+    const auto masquerading_risk =
+        sentinel::assess_file_risk(extension_analysis, false);
+    require(
+        masquerading_risk.score == 60 &&
+            masquerading_risk.severity == "HIGH" &&
+            masquerading_risk.category == "multiple_static_indicator_categories" &&
+            masquerading_risk.confidence == "heuristic_only",
+        "Masquerading plus non-PE executable extension was misclassified.");
 
     const auto high_entropy = root / "high-entropy.bin";
     std::vector<unsigned char> bytes(64 * 1024);
@@ -243,6 +406,12 @@ void test_entropy_and_suspicious_extensions(const std::filesystem::path& root) {
                 return finding.find("high byte entropy") != std::string::npos;
             }),
         "High-entropy heuristic did not emit an indicator.");
+    const auto entropy_risk = sentinel::assess_file_risk(entropy_analysis, false);
+    require(
+        entropy_risk.score == 15 &&
+            entropy_risk.severity == "LOW" &&
+            entropy_risk.category == "high_entropy",
+        "High entropy alone should be a low-severity heuristic, not a detection.");
 }
 
 void test_pe_metadata_and_writable_executable_section(
@@ -305,6 +474,48 @@ void test_malformed_pe_is_reported(const std::filesystem::path& root) {
                 return finding.find("malformed") != std::string::npos;
             }),
         "Malformed PE header did not emit a static-analysis finding.");
+    const auto risk = sentinel::assess_file_risk(analysis, false);
+    require(
+        risk.score == 45 && risk.severity == "HIGH" &&
+            risk.category == "malformed_executable",
+        "Malformed PE risk was misclassified or its correlated indicators double-counted.");
+}
+
+void test_risk_assessment_is_not_a_safety_verdict() {
+    const sentinel::FileAnalysis clean;
+    const auto no_indicators = sentinel::assess_file_risk(clean, false);
+    require(
+        no_indicators.score == 0 &&
+            no_indicators.severity == "NONE" &&
+            no_indicators.category == "no_configured_indicator" &&
+            no_indicators.confidence == "no_configured_indicator",
+        "Clean assessment should report no indicators, not safe.");
+    require(
+        !no_indicators.reasons.empty() &&
+            no_indicators.reasons.front().find("not a safety verdict") !=
+                std::string::npos,
+        "Clean assessment did not explicitly avoid a safety claim.");
+
+    sentinel::FileAnalysis combined;
+    combined.indicators = {
+        {sentinel::IndicatorCategory::malformed_executable, 45, "malformed PE"},
+        {sentinel::IndicatorCategory::malformed_executable, 35, "MZ/PE mismatch"},
+        {sentinel::IndicatorCategory::high_entropy, 15, "high entropy"}};
+    const auto independent = sentinel::assess_file_risk(combined, false);
+    require(
+        independent.score == 60 && independent.severity == "HIGH" &&
+            independent.category == "multiple_static_indicator_categories",
+        "Risk scoring did not combine independent categories or avoid double-counting correlated findings.");
+
+    const auto signature =
+        sentinel::assess_file_risk(clean, true);
+    require(
+        signature.score == 100 &&
+            signature.severity == "SIGNATURE_MATCH" &&
+            signature.category == "local_signature_match" &&
+            signature.confidence ==
+                "exact_local_hash_match_database_authenticity_unverified",
+        "Exact database match did not remain distinct from heuristic severity.");
 }
 
 void test_process_location_heuristic() {
@@ -383,15 +594,20 @@ void test_structured_event_log(const std::filesystem::path& root) {
 int main() {
     try {
         TemporaryDirectory temporary;
+        test_file_change_burst_detection(temporary.path());
         test_sha256_known_vector(temporary.path());
         test_signature_database(temporary.path());
         test_report_only_scan(temporary.path());
+        test_quick_scan_aggregates_and_deduplicates_locations(temporary.path());
         test_quarantine_scan(temporary.path());
+        test_quarantine_restore_never_overwrites(temporary.path());
+        test_quarantine_restore_checks_integrity(temporary.path());
         test_quarantine_within_scan_target(temporary.path());
         test_quarantine_parent_is_rejected(temporary.path());
         test_entropy_and_suspicious_extensions(temporary.path());
         test_pe_metadata_and_writable_executable_section(temporary.path());
         test_malformed_pe_is_reported(temporary.path());
+        test_risk_assessment_is_not_a_safety_verdict();
         test_process_location_heuristic();
         test_configuration_file(temporary.path());
         test_structured_event_log(temporary.path());

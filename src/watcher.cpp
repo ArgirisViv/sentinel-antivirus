@@ -1,5 +1,6 @@
 #include "sentinel/watcher.hpp"
 
+#include "sentinel/behavior.hpp"
 #include "sentinel/logging.hpp"
 #include "sentinel/security.hpp"
 
@@ -131,7 +132,9 @@ DWORD WINAPI watch_worker(void* context_pointer) {
 
             if (notification->Action == FILE_ACTION_ADDED ||
                 notification->Action == FILE_ACTION_MODIFIED ||
-                notification->Action == FILE_ACTION_RENAMED_NEW_NAME) {
+                notification->Action == FILE_ACTION_RENAMED_NEW_NAME ||
+                notification->Action == FILE_ACTION_REMOVED ||
+                notification->Action == FILE_ACTION_RENAMED_OLD_NAME) {
                 std::wstring relative(
                     notification->FileNameLength / sizeof(wchar_t), L'\0');
                 std::memcpy(
@@ -311,6 +314,7 @@ void watch_directory(
     }
     std::unordered_map<std::filesystem::path, std::chrono::steady_clock::time_point>
         pending;
+    FileChangeBurstDetector ransomware_detector;
     std::cout << "Watching recursively: " << root.string()
               << "\nPress Ctrl+C to stop.\n";
     if (options.logger != nullptr) {
@@ -334,7 +338,22 @@ void watch_directory(
 
         const auto now = std::chrono::steady_clock::now();
         for (const auto& path : incoming) {
+            if (options.quarantine_matches && is_within(path, quarantine)) {
+                continue;
+            }
             pending[path] = now;
+            if (ransomware_detector.observe(path, now)) {
+                const auto count = ransomware_detector.recent_distinct_files();
+                const std::string message =
+                    "Ransomware-like activity: " + std::to_string(count) +
+                    " distinct files changed within 10 seconds. No process was "
+                    "blocked or terminated; investigate immediately.";
+                std::cerr << "[RANSOMWARE-LIKE ACTIVITY] " << message << '\n';
+                if (options.logger != nullptr) {
+                    options.logger->write(
+                        "alert", "ransomware_like_file_burst", message, root);
+                }
+            }
         }
 
         for (auto iterator = pending.begin(); iterator != pending.end();) {
@@ -347,9 +366,6 @@ void watch_directory(
 
             const auto file = iterator->first;
             iterator = pending.erase(iterator);
-            if (options.quarantine_matches && is_within(file, quarantine)) {
-                continue;
-            }
 
             try {
                 if (!wait_for_stable_file(file)) {

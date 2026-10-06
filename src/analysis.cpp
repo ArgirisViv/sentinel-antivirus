@@ -7,9 +7,11 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -32,10 +34,48 @@ bool has_finding(const FileAnalysis& analysis, const std::string& finding) {
            analysis.findings.end();
 }
 
-void add_finding(FileAnalysis& analysis, std::string finding) {
+void add_finding(
+    FileAnalysis& analysis,
+    IndicatorCategory category,
+    unsigned int risk_points,
+    std::string finding) {
     if (!has_finding(analysis, finding)) {
-        analysis.findings.push_back(std::move(finding));
+        analysis.findings.push_back(finding);
+        analysis.indicators.push_back(
+            StaticIndicator{category, risk_points, std::move(finding)});
     }
+}
+
+std::string category_name(IndicatorCategory category) {
+    switch (category) {
+    case IndicatorCategory::active_content:
+        return "active_content";
+    case IndicatorCategory::file_masquerading:
+        return "file_masquerading";
+    case IndicatorCategory::malformed_executable:
+        return "malformed_executable";
+    case IndicatorCategory::suspicious_pe_structure:
+        return "suspicious_pe_structure";
+    case IndicatorCategory::high_entropy:
+        return "high_entropy";
+    }
+    return "unknown";
+}
+
+std::string severity_for_score(unsigned int score) {
+    if (score == 0) {
+        return "NONE";
+    }
+    if (score < 20) {
+        return "LOW";
+    }
+    if (score < 40) {
+        return "MEDIUM";
+    }
+    if (score < 70) {
+        return "HIGH";
+    }
+    return "CRITICAL";
 }
 
 std::string lowercase_ascii(std::string value) {
@@ -69,7 +109,11 @@ void inspect_filename(const std::filesystem::path& file, FileAnalysis& analysis)
 
     const auto extension = lowercase_ascii(file.extension().string());
     if (contains_extension(active_extensions, extension)) {
-        add_finding(analysis, "active or executable file extension " + extension);
+        add_finding(
+            analysis,
+            IndicatorCategory::active_content,
+            5,
+            "active or executable file extension " + extension);
     }
 
     if (extension == ".exe" || extension == ".scr" || extension == ".com") {
@@ -78,6 +122,8 @@ void inspect_filename(const std::filesystem::path& file, FileAnalysis& analysis)
         if (contains_extension(lure_extensions, previous_extension)) {
             add_finding(
                 analysis,
+                IndicatorCategory::file_masquerading,
+                25,
                 "double extension may disguise an executable as " + previous_extension);
         }
     }
@@ -164,7 +210,11 @@ void inspect_pe(
     analysis.is_pe = true;
 
     auto malformed = [&analysis] {
-        add_finding(analysis, "malformed or truncated PE image headers");
+        add_finding(
+            analysis,
+            IndicatorCategory::malformed_executable,
+            45,
+            "malformed or truncated PE image headers");
     };
 
     std::uint32_t pe_offset = 0;
@@ -203,16 +253,28 @@ void inspect_pe(
         break;
     default:
         analysis.pe_architecture = "unknown";
-        add_finding(analysis, "PE image uses an unrecognized architecture");
+        add_finding(
+            analysis,
+            IndicatorCategory::suspicious_pe_structure,
+            10,
+            "PE image uses an unrecognized architecture");
         break;
     }
 
     analysis.pe_section_count = section_count;
     if (section_count == 0 || section_count > maximum_normal_pe_sections) {
-        add_finding(analysis, "PE image has an unusual section count");
+        add_finding(
+            analysis,
+            IndicatorCategory::suspicious_pe_structure,
+            10,
+            "PE image has an unusual section count");
     }
     if ((characteristics & 0x0002) == 0) {
-        add_finding(analysis, "PE file header is not marked as an executable image");
+        add_finding(
+            analysis,
+            IndicatorCategory::suspicious_pe_structure,
+            10,
+            "PE file header is not marked as an executable image");
     }
 
     const std::uintmax_t optional_offset =
@@ -249,6 +311,8 @@ void inspect_pe(
             (section_flags & section_write) != 0) {
             add_finding(
                 analysis,
+                IndicatorCategory::suspicious_pe_structure,
+                30,
                 "PE section is both writable and executable");
         }
     }
@@ -344,14 +408,22 @@ FileAnalysis analyze_file(const std::filesystem::path& file) {
                     << analysis.entropy_bits_per_byte
                     << " bits/byte in the first "
                     << analysis.sampled_bytes << " bytes)";
-            add_finding(analysis, message.str());
+            add_finding(
+                analysis,
+                IndicatorCategory::high_entropy,
+                15,
+                message.str());
         }
     }
 
     inspect_filename(file, analysis);
     inspect_pe(input, file_size, analysis);
     if (analysis.is_pe && !analysis.valid_pe) {
-        add_finding(analysis, "file begins with MZ but has no valid PE headers");
+        add_finding(
+            analysis,
+            IndicatorCategory::malformed_executable,
+            45,
+            "file begins with MZ but has no valid PE headers");
     }
     if (!analysis.is_pe) {
         const auto extension = lowercase_ascii(file.extension().string());
@@ -359,10 +431,64 @@ FileAnalysis analyze_file(const std::filesystem::path& file) {
             extension == ".sys" || extension == ".scr") {
             add_finding(
                 analysis,
+                IndicatorCategory::malformed_executable,
+                35,
                 "PE-like file extension does not match a PE image");
         }
     }
     return analysis;
+}
+
+RiskAssessment assess_file_risk(
+    const FileAnalysis& analysis,
+    bool exact_signature_match) {
+    RiskAssessment assessment;
+    if (exact_signature_match) {
+        assessment.score = 100;
+        assessment.severity = "SIGNATURE_MATCH";
+        assessment.category = "local_signature_match";
+        assessment.confidence = "exact_local_hash_match_database_authenticity_unverified";
+        assessment.reasons.emplace_back(
+            "SHA-256 exactly matches an entry in the configured local database; "
+            "the database entry is not independently authenticated.");
+        return assessment;
+    }
+
+    std::vector<std::pair<IndicatorCategory, unsigned int>> category_scores;
+    std::vector<IndicatorCategory> categories;
+    for (const auto& indicator : analysis.indicators) {
+        const auto category = std::find(
+            categories.begin(), categories.end(), indicator.category);
+        if (category == categories.end()) {
+            categories.push_back(indicator.category);
+            category_scores.emplace_back(indicator.category, indicator.risk_points);
+        } else {
+            const auto index = static_cast<std::size_t>(
+                std::distance(categories.begin(), category));
+            category_scores[index].second =
+                std::max(category_scores[index].second, indicator.risk_points);
+        }
+        assessment.reasons.push_back(indicator.description);
+    }
+    unsigned int score = 0;
+    for (const auto& category_score : category_scores) {
+        score = std::min(99U, score + category_score.second);
+    }
+    assessment.score = score;
+    assessment.severity = severity_for_score(score);
+    assessment.confidence =
+        analysis.indicators.empty() ? "no_configured_indicator" : "heuristic_only";
+
+    if (categories.empty()) {
+        assessment.category = "no_configured_indicator";
+        assessment.reasons.emplace_back(
+            "No configured static indicator fired; this is not a safety verdict.");
+    } else if (categories.size() > 1) {
+        assessment.category = "multiple_static_indicator_categories";
+    } else {
+        assessment.category = category_name(categories.front());
+    }
+    return assessment;
 }
 
 std::vector<std::string> analyze_process_image_path(

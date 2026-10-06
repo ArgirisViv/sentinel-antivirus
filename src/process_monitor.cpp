@@ -5,10 +5,13 @@
 #include "sentinel/scanner.hpp"
 
 #include <atomic>
+#include <algorithm>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -270,6 +273,77 @@ void watch_processes(
         logger->write(
             "info", "process_monitor_stopped",
             "Process-start monitoring stopped.");
+    }
+}
+
+void print_process_tree(Logger* logger) {
+    const auto processes = take_process_snapshot();
+    std::unordered_map<DWORD, PROCESSENTRY32W> by_id;
+    std::unordered_map<DWORD, std::vector<DWORD>> children;
+    std::vector<DWORD> roots;
+    by_id.reserve(processes.size());
+    for (const auto& process : processes) {
+        by_id.emplace(process.th32ProcessID, process);
+    }
+
+    for (const auto& process : processes) {
+        const DWORD id = process.th32ProcessID;
+        const DWORD parent = process.th32ParentProcessID;
+        if (parent == id || by_id.find(parent) == by_id.end()) {
+            roots.push_back(id);
+        } else {
+            children[parent].push_back(id);
+        }
+    }
+    const auto by_pid = [](DWORD left, DWORD right) { return left < right; };
+    std::sort(roots.begin(), roots.end(), by_pid);
+    for (auto& [parent, child_ids] : children) {
+        (void)parent;
+        std::sort(child_ids.begin(), child_ids.end(), by_pid);
+    }
+
+    std::unordered_set<DWORD> visited;
+    const auto emit = [&](DWORD root, const std::string& root_prefix) {
+        std::function<void(DWORD, std::size_t)> visit =
+            [&](DWORD id, std::size_t depth) {
+                if (!visited.insert(id).second) {
+                    return;
+                }
+                const auto& process = by_id.at(id);
+                const std::string line =
+                    root_prefix + std::string(depth * 2, ' ') +
+                    (depth == 0 ? "" : "|- ") +
+                    to_utf8(process.szExeFile) + " [PID " +
+                    std::to_string(id) + ", PPID " +
+                    std::to_string(process.th32ParentProcessID) + "]";
+                std::cout << "[PROCESS TREE] " << line << '\n';
+                if (logger != nullptr) {
+                    logger->write("info", "process_tree_entry", line);
+                }
+                const auto descendants = children.find(id);
+                if (descendants != children.end()) {
+                    for (const DWORD child : descendants->second) {
+                        visit(child, depth + 1);
+                    }
+                }
+            };
+        visit(root, 0);
+    };
+
+    std::cout << "Point-in-time process tree (metadata only; no enforcement).\n";
+    for (const DWORD root : roots) {
+        emit(root, {});
+    }
+    for (const auto& process : processes) {
+        if (visited.find(process.th32ProcessID) == visited.end()) {
+            emit(process.th32ProcessID, "[orphan/cycle] ");
+        }
+    }
+    if (logger != nullptr) {
+        logger->write(
+            "info", "process_tree_completed",
+            "Captured " + std::to_string(processes.size()) +
+                " processes in a point-in-time process tree.");
     }
 }
 
