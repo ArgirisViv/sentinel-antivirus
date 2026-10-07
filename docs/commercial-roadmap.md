@@ -2,13 +2,27 @@
 
 ## Product direction
 
-The intended first product is a paid antivirus for home users on Windows 11 and
-on Windows 10 devices only while they remain eligible for and receive security
-updates under Microsoft's applicable program. Cloud services are allowed for
-signed intelligence updates and optional reputation lookups. The protection
-target includes real-time blocking backed by a Windows service and a
-Microsoft-signed kernel component. The current repository is a prototype and
-is not suitable for protecting or marketing as a commercial antivirus.
+The intended first product is a paid antivirus for home users in Greece and the
+EU/EEA on Windows 11 Home/Pro, with cloud services allowed for signed
+intelligence updates and optional reputation lookups. The protection target
+includes real-time blocking backed by a Windows service and a Microsoft-signed
+kernel component. The current repository is a prototype and is not suitable
+for protecting or marketing as a commercial antivirus.
+
+The initial OS support scope is Windows 11 Home/Pro x64, versions 25H2 and 26H2
+on generally available servicing releases, with the latest applicable security
+updates installed. Exclude ARM64, version 26H1, version 24H2, Windows 10, and
+Insider or preview releases from the initial release. Microsoft lists Windows
+26H1 as device-scoped rather than an in-place feature update for existing
+devices, and Windows 24H2 Home/Pro reaches end of servicing on October 13, 2026.
+Reconsider excluded platforms and versions only through a separate compatibility
+and release review.
+
+As a dated reference baseline on October 7, 2026, the latest listed builds are
+26200.9550 for 25H2 and 26300.9550 for 26H2. These are test baselines, not
+permanent build pins: support requires the latest applicable cumulative security
+update for each supported version. See [Microsoft Windows 11 release
+information](https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information).
 
 This roadmap is a gated product-development plan, not a claim of certification,
 security, or feature completeness. The original 30-item wishlist is now mapped
@@ -75,37 +89,130 @@ guarantees of real-world detection:
   Network/web features, ML, privacy extras, Gamer Mode, and vulnerability
   scanning are planned for later releases rather than forced into v1.
 - **Known-threat detection:** at least 95% detection on a documented,
-  legally-obtained, held-out test corpus, with results reported separately by
-  threat family and detection layer. Corpus composition, sample freshness,
-  repetitions, and confidence intervals must be independently reviewed before
-  release claims are made.
-- **False positives:** fewer than 1 false positive per 100,000 benign files in
-  the agreed clean corpus, and zero false positives against the explicitly
-  defined critical Windows/system-file set. Detection and false-positive
-  thresholds must be measured together at the same policy/settings.
-- **Idle performance:** p95 CPU usage below 1% and working set below 200 MB on
-  a representative home-PC baseline of Windows 11, a 4-core CPU, 8 GB RAM,
-  and SSD storage, while real-time protection is enabled and the device is
-  idle. A lower-spec supported system must also be included in compatibility
-  tests. Active-scan impact, boot impact, and interactive latency require
-  separate workload benchmarks.
-- **Cloud and privacy:** local protection continues offline. Default reputation
-  checks send only file hashes and the minimum metadata required for the
-  service; file contents are never uploaded without separate, explicit
-  consent. Hashes and user identifiers are not persistently retained by the
-  cloud service; only anonymous aggregate metrics may be retained. Any
-  temporary identifiable logging requires separate, explicit consent.
-- **Protection failure:** service/driver failure uses fail-open for home-user
-  availability, immediately reports a degraded protection state, and attempts
-  documented recovery. Any exceptions to this policy must be approved and
-  tested before release; failure must never be shown as fully protected.
-- **Supported systems:** Windows 11, plus Windows 10 only while the device
-  remains eligible for and receives Microsoft's applicable security updates.
+  legally obtained, held-out test corpus, plus a pre-agreed minimum detection
+  floor for every in-scope threat family; strong results in one family cannot
+  compensate for a weak family. The primary malware gate covers ransomware,
+  trojans, worms, RATs, and infostealers. Report PUA separately; do not include
+  PUA results in the primary malware aggregate or use them to offset a malware
+  family result. The lower bound of a one-sided 95% confidence interval must
+  meet the overall and every per-family detection threshold. Report results
+  separately by family and detection layer. The independent laboratory
+  proposes family floors, corpus sample size, weighting, repetitions, and
+  confidence-interval methodology for approval before testing. A qualified
+  independent laboratory handles the licensed threat corpus; development and
+  CI use only EICAR/AMTSO test artifacts and synthetic fixtures. Before final
+  evaluation, freeze the exact product build, configuration, policies, rules,
+  and definition set; record cryptographic hashes and build provenance. Any
+  material change after a failed evaluation requires retesting on a fresh,
+  previously unused held-out split. Run the primary detection and false-positive
+  gates on the final release candidate with the shipping default settings;
+  report optional modes and individual detection layers separately, without
+  using them to substitute for the default-settings gate.
+- **False positives:** the upper bound of a one-sided 95% confidence interval
+  for the false-positive rate must be strictly below 1 per 100,000 files in the
+  agreed stratified benign corpus covering Windows files, widely used
+  applications and installers, and common personal file types, with legally
+  obtained samples. The independent laboratory proposes sources, stratum
+  proportions, sample size, and statistical method. Require zero false
+  positives in the explicitly defined critical Windows/system-file subset.
+  Evaluate detection and false-positive thresholds together at the same
+  policy/settings.
+- **Idle performance:** p95 CPU usage below 1% and p95 aggregate working set
+  below 200 MB across all Sentinel user-mode processes on a representative
+  Windows 11 PC with a 4-core CPU, 8 GB RAM, and SSD, with protection enabled
+  while idle. Apply these targets to the baseline hardware on both supported OS
+  versions. Normalize aggregate Sentinel user-mode CPU time to total host
+  capacity across all logical processors for each sample; report driver CPU
+  separately and capture whole-system CPU impact. Record peak working set as a
+  diagnostic. A separate Windows 11
+  compatibility profile uses a 2-core CPU, 4 GB RAM, and HDD; this is a test
+  target, not yet a support promise or a minimum system requirement. Set
+  minimum supported hardware only after measuring scan time, responsiveness,
+  and resource use. Active-scan, boot-impact, and interactive-latency budgets
+  remain separate.
+- **Compatibility matrix:** test all four combinations of Windows 11 Home/Pro
+  x64 25H2 and 26H2 with both the baseline profile (4 cores, 8 GB RAM, SSD) and
+  the low-spec test profile (2 cores, 4 GB RAM, HDD). The low-spec cells assess
+  functional compatibility, stability, data integrity, and truthful protection
+  state, but do not gate performance targets or establish a supported minimum.
+  Use baseline-hardware cells for release performance gates. Review low-spec
+  measurements before setting/publishing minimum requirements. The independent
+  lab proposes exact physical reference systems for both profiles; approve the
+  models before testing. Record CPU SKU/microcode, memory configuration,
+  storage model/firmware, BIOS/UEFI, power/thermal settings, drivers, OS build,
+  and installed updates. Virtual machines may support preliminary checks but
+  cannot replace physical-system release measurements.
+- **Idle measurement protocol:** for each of the four cells, warm up for
+  15 minutes, then measure for 8 hours and repeat in three independent runs.
+  Keep protection enabled, close the main UI, allow scheduled background tasks
+  and definition checks, and do not run a user-triggered scan. Aggregate CPU
+  and working set across all Sentinel user-mode processes; report kernel-driver
+  CPU and paged/nonpaged pool use separately, with driver resource limits set
+  before release. Normalize aggregate user-mode CPU time across all Sentinel
+  processes to total host capacity across logical processors for each sample;
+  calculate p95 CPU and aggregate working set over measured samples, and record
+  peak working set and active-scan resource impact separately. Keep Microsoft
+  Defender enabled and unmodified, preserve the same state and controlled
+  Windows background workload across all runs, and record both
+  Sentinel-attributed and whole-system resource impact.
+- **Manual/full scans:** use adaptive background CPU and disk-I/O priority,
+  throttle under interactive load, and support pause/resume. Set quantitative
+  resource and completion-time budgets from representative-device measurements
+  rather than promising an unmeasured scan duration. Benchmark with a
+  deterministic synthetic benign corpus and a repeatable concurrent interactive
+  workload. The independent lab proposes reproducible scripts for common app
+  launch/use, opening and saving benign files, and file copy/search; approve the
+  scripts before benchmarking. Include two separately reported concurrent-load
+  scenarios: steady everyday activity and short bursts of overlapping app
+  launches/file operations. The lab proposes the workload rates; approve them
+  before acceptance runs. Version the synthetic corpus generator; fix its seed
+  and preserve a manifest plus SHA-256 per generated file. The lab approves
+  file-type, size, archive-depth distributions and benign template sources
+  before tests. Any generator or corpus change creates a new version and
+  baseline. Measure scan completion/throughput, CPU, disk I/O, p95 foreground
+  latency, and pause/resume behavior separately for each load scenario. The lab
+  proposes numerical scan/latency budgets from baseline runs for approval
+  before acceptance. Run three cold-start acceptance scans per matrix cell from
+  the same clean system image after reboot, with no pre-populated Sentinel scan
+  cache; record and hold the OS filesystem-cache procedure consistent. Report
+  warm-cache diagnostics separately, not mixed into cold-start acceptance. Keep
+  live malware out of development/CI.
+- **Cloud privacy:** local protection continues offline. Default reputation
+  requests send only hashes and minimum necessary metadata; file contents are
+  never uploaded without separate explicit consent. Hashes and user
+  identifiers are not persistently retained; anonymous aggregates are allowed.
+  Temporary identifiable logging requires separate explicit consent.
+- **Threat-definition freshness:** check for updates every 4 hours. If
+  definitions are more than 24 hours old while internet connectivity is
+  available, show a degraded warning. Offline local protection continues; mark
+  definitions stale after 30 days without a successful update while offline,
+  without silently treating unknown files as clean or disabling local scanning.
+- **Update trust:** use an offline root signing key protected by an HSM and a
+  separate online delegated signing key in a managed HSM/KMS. The client must
+  validate the signature chain and product/channel/version/expiry policy,
+  reject disallowed rollback, and activate packages only after validation.
+  Rotation, revocation, and compromise recovery require a reviewed lifecycle.
+- **Protection failure:** service/driver failure is fail-open for home-user
+  availability, with a visible degraded status within 5 seconds and a first
+  recovery attempt within 30 seconds. Show healthy only after end-to-end health
+  verification. Allow file operations across operation types during the
+  enforcement outage, keep Microsoft Defender and its settings untouched, and
+  do not report Sentinel protection while enforcement is unavailable. Measure
+  and document the exposure window and residual risk.
+- **Supported systems:** Windows 11 Home/Pro x64 versions 25H2 and 26H2 only
+  for the initial release, on generally available builds with the latest
+  applicable security updates. Exclude ARM64, version 26H1, version 24H2,
+  Windows 10, and Insider or preview releases; reconsider excluded platforms
+  and versions only through a separate compatibility and release review.
 
-The exact lower-spec test system, named corpora, measurement tooling, exact
-Windows builds, and statistical acceptance procedure remain Stage 0 work.
-Internal gates do not substitute for independent security assessment,
-Microsoft driver signing, or external product testing.
+The independent evaluation laboratory, named corpora, measurement tooling,
+minimum supported hardware, behavior and performance acceptance on the
+2-core/4-GB/HDD compatibility test profile, statistical acceptance procedure,
+quantitative active-scan budgets, and detailed failure behavior remain Stage 0
+work. The adaptive background scan policy and degraded/recovery timing
+objectives above are agreed but still require measurement. Internal gates do
+not substitute for independent security assessment, Microsoft driver signing,
+or external product testing.
 
 ### Stage 0 — Product requirements and acceptance baseline
 
@@ -119,16 +226,148 @@ testable acceptance criteria.
   merging distinct capabilities.
 - Mark each item as `not started`, `prototype`, `implemented`, or `commercially
   verified`; do not use one status to imply another.
-- Define supported Windows editions/builds, user privileges, offline behavior,
-  data collection, retention, update cadence, recovery expectations, and
-  performance budgets.
+- Verify Windows 11 Home/Pro x64 25H2 and 26H2 against the dated reference
+  builds and define the monthly security-update compatibility process, user
+  privileges, offline behavior, data collection, retention, update cadence,
+  recovery expectations, and performance budgets. ARM64 requires a separate
+  driver-signing, compatibility, and performance release review.
+- Run the complete four-cell OS-version/hardware-profile compatibility matrix;
+  record exact hardware, firmware, OS build, installed updates, product build,
+  and configuration for every result. Have the independent lab propose exact
+  physical baseline and low-spec systems for approval before release testing;
+  VMs are not substitutes for physical performance evidence.
+- Apply quantitative release performance gates on the 4-core/8-GB/SSD baseline
+  for both supported OS versions. On the 2-core/4-GB/HDD profile, require
+  functional operation, stability, data integrity, and truthful protection
+  status; characterize performance and decide support eligibility before
+  publishing minimum hardware requirements.
+- For idle performance in each cell, use a 15-minute warm-up followed by an
+  8-hour measurement, repeated in three independent runs; calculate p95 CPU
+  and aggregate working set across Sentinel user-mode processes and report peak
+  working set, with protection on, UI closed, scheduled background tasks
+  enabled, and no user-triggered scan.
+  Normalize aggregate user-mode CPU time to total host capacity across all
+  logical processors per sample. Measure kernel-driver CPU and paged/nonpaged
+  pool separately, set driver limits before release, and report active-scan
+  resources separately. Keep Microsoft Defender enabled and unmodified with
+  consistent settings and controlled Windows background workload across runs;
+  capture whole-system impact as well as Sentinel-attributed resource use.
+- For manual/full-scan performance in each cell, use a deterministic synthetic
+  benign corpus whose file-type, size, and archive distributions are defined
+  before the benchmark. Version the generator, use a fixed seed, preserve a
+  manifest and per-file SHA-256 hashes, and approve distributions and benign
+  template sources with the lab. A corpus/generator change requires a new
+  version and baseline. Use lab-proposed, pre-approved workload scripts for
+  common app launch/use, benign-file open/save, and file copy/search, with
+  separately measured steady everyday and short burst load scenarios. Approve
+  workload rates before acceptance. Measure completion time/throughput, CPU,
+  disk I/O, p95 foreground latency, and pause/resume separately per scenario.
+  Approve numerical scan/latency budgets based on baseline runs before
+  acceptance runs. Perform three cold-start scans per cell from the same clean
+  image after reboot with no pre-populated Sentinel scan cache; report warm-cache
+  diagnostics separately. Do not run live malware in development or CI.
+- Measure the 2-core/4-GB/HDD compatibility profile but do not treat it as a
+  support commitment. Set and publish minimum supported hardware requirements
+  from measured scan-time, responsiveness, and resource-use results.
+- Record the agreed offline-root/online-delegated update-signing key hierarchy;
+  specify key rotation, revocation, emergency recovery, and compromise-response
+  procedures before implementation.
+- Specify signed-definition freshness states, the 4-hour update check, the
+  24-hour online degraded warning, and the 30-day offline stale warning.
+- Define and test the 5-second degraded-state and 30-second recovery-attempt
+  objectives, including the end-to-end health checks required to clear degraded
+  state.
+- Benchmark manual/full scans in adaptive background mode on representative
+  hardware; set CPU, disk-I/O, responsiveness, pause/resume, and completion-time
+  acceptance budgets from measured results.
+- Define the safe synthetic scan corpus distributions and repeatable interactive
+  workload; benchmark each of the four OS/hardware cells and use the results to
+  set active-scan acceptance budgets.
+- Shortlist an independent evaluation laboratory only if it demonstrates all
+  of the following: relevant Windows antivirus testing experience; legal
+  authority to access and handle the proposed threat corpus in a controlled
+  environment; a documented, reproducible methodology with pre-agreed sample
+  attribution, statistical analysis, and repeatability controls; reporting of
+  results and limitations by threat family and detection layer; and disclosure
+  of conflicts of interest, funding, and relevant commercial relationships.
+  Require the laboratory to remain free to report unfavorable findings; payment
+  must not depend on passing or on a favorable result.
+- Desk-researched candidate shortlist as of 2026-10-07; this is not a
+  qualification, endorsement, or selection. Invite proposals only after
+  confirming that each candidate can pass every mandatory gate above:
+
+  | Candidate | Publicly documented fit | Important limitation to resolve before scoring |
+  |---|---|---|
+  | [AV-Comparatives](https://av-comparatives.org/services/cybersecurity-vendors/) | Offers confidential private assessments for vendors and publishes a Windows consumer antivirus test series. | Confirm whether it will accept a new, small consumer-AV vendor for the full custom scope, and obtain evidence for corpus custody, per-family/layer reporting, the four physical test cells, retest rules, and publication terms. |
+  | [SE Labs](https://selabs.uk/services/cyber-security-vendor/) | Describes vendor testing levels including evaluation/advanced work and lists antivirus testing among its services; it publishes endpoint anti-malware methodologies and reports. | Confirm fit for the specified consumer Windows 11 product and bespoke statistical gates, licensed-corpus access/custody, repeatability, the four physical test cells, and unfavorable-result publication rights. |
+  | [Virus Bulletin / VB100](https://www.virusbulletin.com/testing/vb1001/vb100-vendors/) | Explicitly offers private, one-off, and custom tests, including altered or fully custom methodologies. | The standard VB100 scope focuses on static detection of common Windows PE malware. Confirm that a custom engagement can cover behavior/blocking layers, all required families, the benign strata, active-scan performance, and the complete acceptance protocol; do not treat a standard VB100 result as sufficient for this product gate. |
+  | [AV-TEST](https://www.av-test.org/en/antivirus/home-windows/) | Publishes recurring Windows consumer antivirus evaluations, including protection, performance, and usability results. | Public material reviewed confirms relevant comparative testing, but not a bespoke private engagement meeting this scope. Keep as a reserve candidate unless it confirms the commissioning model, full methodology, corpus controls, reporting, and publication terms in writing. |
+
+  Public service descriptions establish only a reason to send an information
+  request. They do not prove independence for this engagement, legal corpus
+  authority, security controls, pricing, availability, or acceptance of our
+  contractual requirements. Record the dated source and the candidate's written
+  response for each mandatory gate; mark any unverified item as pending, never
+  as a pass. The initial outreach set should prioritize AV-Comparatives, SE Labs,
+  and Virus Bulletin, with AV-TEST retained as a reserve pending confirmation.
+- Evaluate each proposal in two stages. First apply mandatory pass/fail gates:
+  every capability and independence criterion above, lawful corpus access and
+  handling, adequate security/custody controls, acceptance of the no-contingent-
+  payment and unfavorable-reporting terms, and agreement to the required
+  deliverables and retest protections. Reject any proposal that fails a gate;
+  do not let a high price/quality score compensate for a failed mandatory gate.
+- Score only proposals that pass all mandatory gates using the same documented
+  100-point rubric: protocol/statistical rigor and reproducibility (30 points);
+  threat and benign corpus provenance, representativeness, and family coverage
+  (20); reporting completeness, evidence quality, and repeatability (20);
+  corpus custody/security and incident handling (15); independence,
+  transparency, and conflict management (10); and total cost and delivery
+  schedule (5). Record evidence and rationale for every score; set a minimum
+  qualifying score of 80/100 before reviewing proposals, and document any
+  tie-break without weakening a mandatory gate.
+- Before contract signature, approve a written statement of work defining
+  corpus provenance and legal scope, lab custody and access controls, the
+  physical four-cell hardware matrix, the synthetic corpus and interactive
+  workload protocol, test configurations and frozen build inputs, statistical
+  methods, deliverables, retest rules, data retention/destruction, and report
+  publication/claims restrictions.
+- Require deliverables that include the approved protocol, test environment and
+  product-build provenance, corpus versions and non-sensitive sample
+  identifiers/hashes, per-family/per-layer and PUA-separate results, false
+  positives by benign stratum, statistical bounds, deviations, failed runs,
+  limitations, and repeatability evidence. Keep licensed threat samples and
+  their contents under the laboratory's legal and security controls; do not
+  place them in developer or CI environments.
+- Approve the detection acceptance protocol before testing: overall 95% gate
+  plus a minimum per-family floor for ransomware, trojans, worms, RATs, and
+  infostealers; report PUA separately from the primary malware gate. Agree on
+  taxonomy, sample attribution, corpus composition, sufficient sample size,
+  family weighting, repetitions, and one-sided 95% confidence-interval
+  methodology with the independent laboratory before testing. Require the
+  lower confidence bound to meet each detection threshold.
+- Approve the false-positive protocol before testing: require the upper
+  one-sided 95% confidence bound to be strictly below 1/100,000 on a stratified,
+  legally sourced benign corpus spanning Windows files, widely used
+  applications/installers, and common personal file types. Have the independent
+  laboratory propose sources, stratum proportions, sample size, and statistical
+  method; require zero findings on the critical Windows/system-file subset and
+  evaluate on the final release candidate with the same shipping default
+  settings as detection.
+- Freeze and record the evaluated build, configuration, policy, rules, and
+  definition set with cryptographic hashes and build provenance. Require a
+  fresh, unused held-out split after any material change to an evaluation that
+  did not pass.
 - Identify all security-critical assets, trust boundaries, abuse cases, and
   failure modes.
 
 **Exit gate:** All 30 source items map to requirements and measurable
 acceptance tests; the agreed gates above are tied to named test corpora,
 reference hardware, and supported OS builds; remaining product assumptions
-and unresolved legal/privacy decisions are recorded and assigned.
+and unresolved legal/privacy decisions are recorded and assigned. A laboratory
+meeting every mandatory independence and capability criterion is selected, and
+its statement of work, test protocol, corpus/legal scope, evidence deliverables,
+and publication limits are approved before licensed threat-corpus testing.
+Development and CI use safe test artifacts only.
 
 ### Stage 1 — Secure product foundation
 
@@ -140,8 +379,10 @@ trust boundaries.
 - Define component boundaries for UI, privileged Windows service, scanning
   engine, kernel component, update/reputation services, and installer.
 - Design authenticated IPC, least privilege, service recovery, upgrade and
-  rollback behavior, key custody, secrets handling, and signed release
-  artifacts.
+  rollback behavior, the agreed offline-root/online-delegated signing-key
+  hierarchy, secrets handling, and signed release artifacts.
+- Specify the agreed fail-open policy, including degraded-state reporting,
+  recovery behavior, residual exposure, and in-flight scan decisions.
 - Define privacy-by-design rules for cloud lookups, including data
   minimization, consent, retention, transport security, and failure behavior.
 - Establish reproducible CI builds, dependency governance, threat modeling,
@@ -261,13 +502,14 @@ procedures before using them to make release decisions.
 
 ## Immediate next step
 
-Close Stage 0 by selecting the named test corpora, defining the lower-spec
-compatibility system and exact supported Windows builds, setting cloud
-metadata retention, and agreeing release priorities against the matrix above.
-The representative performance baseline is Windows 11, 4-core CPU, 8 GB RAM,
-and SSD. Windows 10 version 22H2 Home/Pro
-reached general Microsoft end of support on October 14, 2025; eligibility for
-any extended updates must be checked rather than assumed. See
-[Microsoft's Windows 10 lifecycle notice](https://learn.microsoft.com/en-us/lifecycle/announcements/windows-10-end-of-support).
+The current target architecture proposal is documented in
+[commercial-core-architecture.md](./commercial-core-architecture.md). Close
+Stage 0 by selecting and contracting an independent evaluation laboratory for
+the licensed threat corpus, selecting a benign corpus and methodology,
+validating the dated 25H2/26H2 reference-build matrix and lower-spec
+compatibility system, specifying statistical acceptance procedures and
+separate active-scan budgets, and agreeing release priorities against the
+matrix above. Windows 10 is excluded from the initial support scope; any later
+addition requires a separate compatibility, lifecycle, and release review.
 Do not begin kernel-driver or cloud-service implementation before their
 architecture, threat model, and recovery behavior pass review.
