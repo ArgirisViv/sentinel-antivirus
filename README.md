@@ -22,10 +22,14 @@
 > antivirus software. Scanning and monitoring are best-effort; it does not
 > block threats or provide always-on protection.
 
-## Preview
+## Screenshots
 
 <p align="center">
-  <img src="docs/images/demo.gif" alt="Sentinel AV animated desktop preview" width="88%">
+  <img src="docs/images/dashboard.png" alt="Sentinel AV desktop dashboard" width="100%">
+</p>
+
+<p align="center">
+  <img src="docs/images/startup-splash.png" alt="Sentinel AV animated startup screen" width="82%">
 </p>
 
 ## Highlights
