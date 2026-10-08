@@ -86,14 +86,17 @@
 .page-title { -fx-font-size: 22px; -fx-font-weight: bold; -fx-text-fill: -sn-text; }
 .page-subtitle { -fx-font-size: 13px; -fx-text-fill: -sn-text-3; }
 
-.splash-root { -fx-background-color: #0a0e13; }
-.splash-title { -fx-font-size: 31px; -fx-font-weight: bold; -fx-letter-spacing: 2px; }
-.splash-eyebrow { -fx-font-size: 10px; -fx-font-weight: bold; -fx-text-fill: -sn-accent; }
+.splash-root { -fx-background-color: #080d12; }
+.splash-wordmark { -fx-font-size: 19px; -fx-font-weight: bold; -fx-letter-spacing: 2px; }
+.splash-eyebrow { -fx-font-size: 9px; -fx-font-weight: bold; -fx-text-fill: -sn-accent; -fx-letter-spacing: 1.2px; }
+.splash-headline { -fx-font-size: 37px; -fx-font-weight: bold; -fx-text-fill: #f0f6f8; -fx-line-spacing: 3px; }
 .splash-description { -fx-font-size: 13px; -fx-text-fill: -sn-text-2; }
-.splash-status { -fx-font-size: 9px; -fx-font-weight: bold; -fx-text-fill: -sn-text-3; -fx-padding: 8 0 0 0; }
+.splash-status { -fx-font-size: 9px; -fx-font-weight: bold; -fx-text-fill: #b4c3ce; -fx-letter-spacing: 0.7px; }
+.splash-status-dot { -fx-effect: dropshadow(gaussian, rgba(45,212,191,0.72), 8, 0.35, 0, 0); }
+.splash-local-tag { -fx-font-size: 9px; -fx-font-weight: bold; -fx-text-fill: -sn-text-3; -fx-letter-spacing: 1px; }
 .splash-progress { -fx-accent: -sn-accent; -fx-pref-height: 3px; }
-.splash-progress > .track { -fx-background-color: rgba(255,255,255,0.08); -fx-background-radius: 2; }
-.splash-progress > .bar { -fx-background-radius: 2; -fx-background-insets: 0; }
+.splash-progress > .track { -fx-background-color: rgba(255,255,255,0.1); -fx-background-radius: 2; }
+.splash-progress > .bar { -fx-background-radius: 2; -fx-background-insets: 0; -fx-effect: dropshadow(gaussian, rgba(45,212,191,0.45), 8, 0.3, 0, 0); }
 
 /* ---------- Pills & chips ---------- */
 .pill {
