@@ -1,22 +1,74 @@
 # Sentinel AV
 
-Sentinel AV is a Windows-only portfolio project for learning endpoint-security
-concepts. It provides a C++17 file scanner and recursive real-time filesystem
-monitor with SHA-256 signatures and an explicit, opt-in quarantine action. It
-is a demonstration, not a replacement for commercial antivirus software.
+<p align="center">
+  <img src="management/src/main/resources/com/sentinelav/desktop/logo.png" alt="Sentinel AV shield logo" width="112">
+</p>
 
-## Build
+<p align="center">
+  <strong>A Windows endpoint-security prototype built with C++17 and JavaFX.</strong><br>
+  Native file scanning, explainable static indicators, best-effort monitoring, and a polished local desktop console.
+</p>
 
-Requirements: Windows, CMake 3.16+, and a C++17 compiler. SHA-256 is provided by
-Windows CNG (`bcrypt.dll`); no third-party packages are required.
+<p align="center">
+  <a href="https://github.com/ArgirisViv/sentinel-antivirus/actions/workflows/ci.yml">
+    <img src="https://github.com/ArgirisViv/sentinel-antivirus/actions/workflows/ci.yml/badge.svg?branch=main" alt="Windows CI status">
+  </a>
+  <img src="https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus" alt="C++17">
+  <img src="https://img.shields.io/badge/UI-JavaFX-4A90D9" alt="JavaFX">
+  <img src="https://img.shields.io/badge/platform-Windows-0078D4?logo=windows" alt="Windows">
+</p>
+
+> **Scope:** This is an educational portfolio project, not production antivirus
+> software. Detection and monitoring are best-effort; the app does not provide
+> always-on protection or block threats.
+
+## Product preview
+
+<p align="center">
+  <img src="docs/images/dashboard.png" alt="Sentinel AV desktop dashboard" width="88%">
+</p>
+<p align="center"><em>JavaFX security console with local scan controls, activity, and quarantine management.</em></p>
+
+<p align="center">
+  <img src="docs/images/startup-splash.png" alt="Sentinel AV animated startup screen" width="72%">
+</p>
+<p align="center"><em>Custom animated startup screen and cybersecurity-inspired visual identity.</em></p>
+
+## What this project demonstrates
+
+- **Native Windows engineering:** C++17, Windows CNG SHA-256, filesystem
+  notifications, process snapshots, and careful resource/error handling.
+- **Detection clarity:** exact local signature matches are distinct from
+  explainable static heuristics; risk scores are prioritization signals, not
+  probabilities or proof of malware.
+- **Safer quarantine workflow:** opt-in movement of exact matches, restricted
+  ACLs on newly created quarantine locations, local metadata, and hash-checked
+  restore.
+- **Desktop integration:** JavaFX starts and supervises the local scanner as a
+  child process, streams its output, and presents scan and quarantine controls.
+- **Verification and documentation:** Windows CI, C++ and Java tests, an
+  architecture overview, and a scoped threat model.
+
+## Quick start
+
+Requirements: Windows, CMake 3.16+, and a C++17 compiler (Visual Studio Build
+Tools or another supported Windows toolchain).
 
 ```powershell
 cmake -S . -B build
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
+.\scripts\demo-safe.ps1
 ```
 
-## Try the harmless test vector
+The safe demo creates harmless text fixtures in a temporary directory,
+demonstrates report-only scanning and explicit quarantine of the example `abc`
+test vector, then cleans up. The example hash is **not a malware signature**.
+
+## Scanner examples
+
+The C++ engine uses Windows CNG (`bcrypt.dll`) for SHA-256; no third-party
+runtime packages are required.
 
 The example database contains only the SHA-256 of the harmless text `abc`.
 It is included to verify the scanner pipeline and is **not a malware signature**.
