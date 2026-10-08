@@ -147,10 +147,10 @@ pipe server, or network port; command arguments are passed directly without a
 shell.
 
 Requirements: JDK 25+. Build the C++ engine first using the instructions above,
-then run the Java tests or launch the dashboard from the repository root:
+then run the Java tests or launch the dashboard:
 
 ```powershell
-cd management
+Set-Location .\management
 .\mvnw.cmd test
 .\mvnw.cmd javafx:run
 ```
@@ -158,25 +158,23 @@ cd management
 The checked-in Maven Wrapper downloads the pinned Apache Maven distribution on
 first use; no system-wide Maven installation is required.
 
-The dashboard uses a rounded, dark plum-and-navy security-center layout with
-magenta accents, a fixed sidebar, compact top bar, status banner, and six action
-cards. The cards open:
+The dashboard includes a branded startup screen, animated cybersecurity
+background, and a dark graphite interface with teal accents. Its pages are:
 
-- **Quick scan:** scans the current user's Downloads, temporary, and Startup
-  folders. Missing locations are skipped and reported; inaccessible locations
-  produce errors. It does not scan all of AppData or active process images.
-- **Full scan:** asks you to choose a drive or folder, confirms the selection,
-  then recursively scans that location. Runtime and coverage depend on the
-  selected location and Windows file permissions; this does not promise a
-  complete scan of every volume.
-- **Real-time monitoring:** opens manual folder and process monitoring controls.
+- **Dashboard:** scan status, recent activity, and quick actions.
+- **Scanner:** start a Quick Scan, select a folder or file, and follow live
+  engine output. Quick Scan checks the current user's Downloads, temporary,
+  and Startup folders. Missing locations are skipped and reported;
+  inaccessible locations produce errors. It does not scan all of AppData or
+  active process images.
+- **Monitoring:** start and stop the optional folder and process monitoring.
   Monitoring is best-effort and only runs after you start it.
-- **Threat history:** shows engine output and events for the current app
-  session; the Java dashboard does not persist a threat database.
+- **Activity:** review engine output and events for the current app session;
+  the Java dashboard does not persist a threat database.
 - **Quarantine:** configures opt-in movement of exact signature matches. The
   dashboard provides local history and a restore action; it does not delete
   quarantined files.
-- **Process monitor:** opens the process-monitor controls.
+- **Settings:** configure engine, signatures, and optional configuration paths.
 
 Summary counters reflect the current scan/session, not lifetime totals. The
 status banner says the device is ready or shows the current scan/engine state;
@@ -195,6 +193,26 @@ processes being monitored.
 The Java EngineClient tests cover child-process output capture, exit codes,
 exclusive engine operation, stop requests, and missing-executable errors.
 
+### Launch without a terminal (Windows)
+
+To create a double-clickable app image with a bundled Java runtime, JDK 25+
+(including `jpackage`) is required. First build the C++ engine. The packaging
+script expects it at `build\sentinel-av.exe`; if a multi-configuration CMake
+generator placed it at `build\Release\sentinel-av.exe`, copy it into that
+expected location:
+
+```powershell
+Copy-Item .\build\Release\sentinel-av.exe .\build\sentinel-av.exe
+.\scripts\package-app.ps1
+```
+
+The launcher is created at `dist\SentinelAV\SentinelAV.exe`. Open that file or
+create a Windows shortcut to it; keep the complete `dist\SentinelAV` folder
+together because it contains the application runtime and bundled engine. The
+generated `dist` directory is ignored by Git. Re-run the packaging script after
+changing the dashboard or rebuilding the engine. This creates an app image,
+not a Setup installer.
+
 ## Docker
 
 The [Dockerfile](Dockerfile) works with the default Linux-container mode of
@@ -203,7 +221,8 @@ it to `sentinel-av.exe` with MinGW-w64 and runs it under Wine. The C++ tests run
 during the image build, also under Wine. Wine is an emulation layer, so use the
 image to build, test, and demonstrate the scanner; native Windows remains the
 reference platform. The JavaFX window is a desktop application and is not run in
-a container.
+a container. Use the packaged Windows app above for the graphical dashboard;
+Docker is for the scanner engine and its mounted-volume demonstrations.
 
 ```powershell
 # Build the image (cross-compiles the engine and runs the C++ tests)

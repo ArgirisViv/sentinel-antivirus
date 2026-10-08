@@ -3,3 +3,5 @@
 /quarantine/
 /logs/
 /management/target/
+
+dist/
