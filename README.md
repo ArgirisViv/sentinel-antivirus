@@ -36,10 +36,13 @@
 
 - Native Windows C++17 scanner using Windows CNG SHA-256 and a strict, local
   signature database.
+- Exact EICAR standard test-file detection from a bounded content prefix,
+  clearly labelled as a harmless test pattern rather than malware.
 - Separates exact signature matches from explainable static indicators; risk
   scores are prioritization signals, not probabilities.
-- Optional quarantine for exact matches, with restricted ACLs on newly created
-  locations, local history, and hash-checked restore.
+- Optional quarantine for exact signature/EICAR test detections, with
+  restricted ACLs on newly created locations, local history, and hash-checked
+  restore.
 - Best-effort recursive file monitoring, process-start snapshots, and
   alert-only file-change burst heuristic.
 - JavaFX desktop console supervises the local engine process and streams its
@@ -60,10 +63,12 @@ ctest --test-dir build -C Release --output-on-failure
 
 The demo uses harmless text fixtures, including the well-known `abc` hash
 vector, in a temporary directory. It demonstrates report-only scanning and
-explicit quarantine, then removes its files. The EICAR test string is used
-only by the separate, opt-in [EICAR demo](scripts/demo-eicar.ps1); it is not
-bundled as a signature or specially detected by the scanner. Other antivirus
-products may flag or quarantine that standard test file.
+explicit quarantine, then removes its files. Sentinel also recognizes the
+exact standard EICAR test string within a bounded 128-byte file prefix; this
+is a specific harmless test-pattern check, not a malware signature or evidence
+of general malware-detection capability. The separate
+[EICAR demo](scripts/demo-eicar.ps1) is opt-in because other antivirus
+products may flag or quarantine its fixture.
 
 ## Run the desktop app
 
@@ -91,6 +96,6 @@ together.
 ## Future work
 
 Potential engineering follow-ups include broader benign-corpus validation,
-parser fuzzing, measured scan-performance baselines, and stronger UI-level
-automated tests. These are proposed improvements, not implemented product
-claims.
+parser fuzzing, measured scan-performance baselines, stronger UI-level
+automated tests, and splitting the JavaFX dashboard into smaller page
+components. These are proposed improvements, not implemented product claims.

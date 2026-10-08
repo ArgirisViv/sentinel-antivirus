@@ -1,6 +1,7 @@
 #include "sentinel/analysis.hpp"
 #include "sentinel/behavior.hpp"
 #include "sentinel/config.hpp"
+#include "sentinel/eicar.hpp"
 #include "sentinel/hash.hpp"
 #include "sentinel/logging.hpp"
 #include "sentinel/quick_scan.hpp"
@@ -17,6 +18,7 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -111,6 +113,41 @@ void test_sha256_known_vector(const std::filesystem::path& root) {
         sentinel::sha256_file(file) ==
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
         "SHA-256 did not match the known abc vector.");
+}
+
+void test_eicar_test_file_matcher() {
+    const std::string eicar =
+        std::string("X5O!P%@AP[4\\P") +
+        "ZX54(P^)7CC)7}$EICAR-" +
+        "STANDARD-ANTIVIRUS-" +
+        "TEST-FILE!$H+H*";
+    require(eicar.size() == 68, "EICAR test string should contain 68 bytes.");
+    require(
+        sentinel::is_eicar_test_file(eicar),
+        "Exact EICAR test string was not recognized.");
+    require(
+        sentinel::is_eicar_test_file(eicar + " \r\n\t\x1a"),
+        "Allowed trailing EICAR whitespace was not accepted.");
+    require(
+        sentinel::is_eicar_test_file(eicar + std::string(128 - eicar.size(), ' ')),
+        "An EICAR test string padded to the 128-byte read limit was rejected.");
+    require(
+        !sentinel::is_eicar_test_file(eicar + "x"),
+        "Extra non-whitespace bytes after EICAR were accepted.");
+    require(
+        !sentinel::is_eicar_test_file(eicar + "x \t"),
+        "Non-whitespace trailing data was accepted after EICAR.");
+    require(
+        !sentinel::is_eicar_test_file(
+            std::string_view(eicar).substr(0, eicar.size() - 1)),
+        "A truncated EICAR test string was accepted.");
+    require(
+        !sentinel::is_eicar_test_file("prefix" + eicar),
+        "An EICAR test string embedded in other content was accepted.");
+    require(
+        !sentinel::is_eicar_test_file(
+            eicar + std::string(129 - eicar.size(), ' ')),
+        "Input longer than the bounded 128-byte prefix was accepted.");
 }
 
 void test_file_change_burst_detection(const std::filesystem::path& root) {
@@ -596,6 +633,7 @@ int main() {
         TemporaryDirectory temporary;
         test_file_change_burst_detection(temporary.path());
         test_sha256_known_vector(temporary.path());
+        test_eicar_test_file_matcher();
         test_signature_database(temporary.path());
         test_report_only_scan(temporary.path());
         test_quick_scan_aggregates_and_deduplicates_locations(temporary.path());

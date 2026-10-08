@@ -8,6 +8,13 @@ runtime packages are required.
 The example database contains only the SHA-256 of the harmless text `abc`.
 It is included to verify the scanner pipeline and is **not a malware signature**.
 
+The scanner also checks at most the first 128 bytes of each file for the exact
+standard EICAR test string. It allows only trailing spaces, tabs, CR/LF, and
+Ctrl-Z; embedded occurrences, extra non-whitespace bytes, and truncated
+strings do not match. Results are labelled `EICAR-Test-File (standard AV test
+string, not malware)`. This narrow test-pattern check is not a malware
+signature or evidence of general malware-detection capability.
+
 ```powershell
 [System.IO.File]::WriteAllText("$PWD\safe-test.txt", "abc")
 .\build\Release\sentinel-av.exe scan .\safe-test.txt --signatures .\signatures.example.txt
@@ -39,7 +46,7 @@ and Startup folder:
 Missing optional locations are reported as skipped; discovery or access errors
 are reported in the summary and produce a nonzero exit status. Quick Scan does
 not scan all of AppData or active process images. As with other scans, it only
-reports detections unless exact-signature quarantine is explicitly enabled.
+reports detections unless quarantine is explicitly enabled.
 
 When `log_file` is configured, the engine appends structured JSON Lines events
 with UTC timestamps, severity, event name, message, and path. The active log is
@@ -158,9 +165,9 @@ background, and a dark graphite interface with teal accents. Its pages are:
   Monitoring is best-effort and only runs after you start it.
 - **Activity:** review engine output and events for the current app session;
   the Java dashboard does not persist a threat database.
-- **Quarantine:** configures opt-in movement of exact signature matches. The
-  dashboard provides local history and a restore action; it does not delete
-  quarantined files.
+- **Quarantine:** configures opt-in movement of exact signature matches and
+  EICAR test-file detections. The dashboard provides local history and a
+  restore action; it does not delete quarantined files.
 - **Settings:** configure engine, signatures, and optional configuration paths.
 
 Summary counters reflect the current scan/session, not lifetime totals. The
@@ -272,9 +279,10 @@ removes its temporary files afterward.
 [GitHub Actions CI](../.github/workflows/ci.yml) builds and runs the C++ tests
 on Windows and runs the Java tests.
 
-The optional EICAR script creates the standard harmless test string and a
-matching temporary local hash signature, runs a report-only scan, and removes
-its temporary files. Run it only after reviewing it and explicitly opt in:
+The optional EICAR script creates the standard harmless test string, scans it
+against an empty local signature database, verifies the built-in content
+detection, and removes its temporary files. Run it only after reviewing it
+and explicitly opting in:
 
 ```powershell
 .\scripts\demo-eicar.ps1 -RunEicarTest
@@ -282,7 +290,7 @@ its temporary files. Run it only after reviewing it and explicitly opt in:
 
 Windows Security or another antivirus may alert on or quarantine this test
 file; that is expected behavior. The string is not bundled in the example
-signature database, and the scanner has no EICAR-specific detection rule.
+signature database.
 
 ## Static analysis indicators
 

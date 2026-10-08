@@ -39,17 +39,21 @@ flowchart TB
     CLI --> ProcessTree
     CLI --> QuickScan
     QuickScan --> Files
-    CLI -->|Opt-in signature match only| Quarantine
+    CLI -->|Opt-in signature or EICAR test detection| Quarantine
     Quarantine --> Metadata
     CLI --> EventLog
 ```
 
 ## Components
 
-- **C++ CLI:** `scan`, `quick-scan`, `watch`, and `processes` commands. File signature
-  matches are definitive detections; static heuristics are separate indicators.
+- **C++ CLI:** `scan`, `quick-scan`, `watch`, `processes`, `process-tree`, and
+  `quarantine` commands. Exact local hash matches and the bounded EICAR test
+  pattern are detections; static heuristics are separate indicators.
 - **Hash and signatures:** SHA-256 through Windows CNG, compared against a
-  strict local text database.
+  strict local text database. The built-in EICAR test check examines at most
+  the first 128 bytes and requires the exact standard test string, allowing
+  only its documented trailing whitespace characters; it is not a malware
+  signature.
 - **Static analysis:** Samples at most 1 MiB for entropy and reads bounded PE
   headers/section flags without loading or executing a file.
 - **Risk classification:** Combines documented static-indicator category
@@ -82,8 +86,9 @@ flowchart TB
 
 1. A user starts a CLI operation directly or through the JavaFX client.
 2. The engine validates configuration and loads the local signature database.
-3. A scan gathers static indicators, hashes each regular file, and reports
-   matching signatures separately from heuristic context.
+3. A scan gathers static indicators, hashes each regular file, checks the
+   bounded EICAR test prefix, and reports exact signature/EICAR detections
+   separately from heuristic context.
 4. Quarantine, when explicitly enabled, moves only hash-matched files and
    applies a restricted ACL and records local metadata for later review/restore.
 5. Structured event records are appended to the configured local log.

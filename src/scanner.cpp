@@ -1,11 +1,13 @@
 #include "sentinel/scanner.hpp"
 
 #include "sentinel/analysis.hpp"
+#include "sentinel/eicar.hpp"
 #include "sentinel/hash.hpp"
 #include "sentinel/logging.hpp"
 #include "sentinel/security.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <ctime>
 #include <filesystem>
@@ -15,6 +17,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -153,6 +156,35 @@ bool is_sha256(const std::string& value) {
     });
 }
 
+bool matches_eicar_test_file(const std::filesystem::path& file) {
+    std::error_code error;
+    const auto size = std::filesystem::file_size(file, error);
+    if (error) {
+        throw std::runtime_error(
+            "Cannot inspect file size for EICAR test detection: " +
+            file.string() + ": " + error.message());
+    }
+    if (size > eicar_maximum_prefix_size) {
+        return false;
+    }
+
+    std::ifstream input(file, std::ios::binary);
+    if (!input) {
+        throw std::runtime_error(
+            "Cannot open file for EICAR test detection: " + file.string());
+    }
+    std::array<char, eicar_maximum_prefix_size> prefix{};
+    input.read(prefix.data(), static_cast<std::streamsize>(prefix.size()));
+    if (input.bad()) {
+        throw std::runtime_error(
+            "Cannot read file for EICAR test detection: " + file.string());
+    }
+    const auto bytes_read = static_cast<std::size_t>(input.gcount());
+    return bytes_read == size &&
+           sentinel::is_eicar_test_file(
+               std::string_view(prefix.data(), bytes_read));
+}
+
 void write_quarantine_metadata(
     const std::filesystem::path& directory,
     const std::filesystem::path& destination,
@@ -230,8 +262,10 @@ void scan_file_impl(
         const std::string hash = sha256_file(file);
         ++summary.files_scanned;
         const auto match = signatures.find(hash);
+        const bool signature_match = match != signatures.end();
+        const bool eicar_match = matches_eicar_test_file(file);
         const auto risk = assess_file_risk(
-            analysis, match != signatures.end());
+            analysis, signature_match);
         if (risk.score > summary.highest_risk_score) {
             summary.highest_risk_score = risk.score;
             summary.highest_risk_severity = risk.severity;
@@ -262,17 +296,21 @@ void scan_file_impl(
                     file);
             }
         }
-        if (match == signatures.end()) {
+        if (!signature_match && !eicar_match) {
             return;
         }
 
         ++summary.threats_detected;
+        const std::string threat = signature_match
+            ? match->second
+            : "EICAR-Test-File (standard AV test string, not malware)";
         std::cout << "[DETECTED] " << file.string()
-                  << " | " << match->second << " | SHA-256 " << hash << '\n';
+                  << " | " << threat << " | SHA-256 " << hash << '\n';
         if (options.logger != nullptr) {
             options.logger->write(
-                "alert", "signature_detection",
-                match->second + " | SHA-256 " + hash, file);
+                "alert",
+                signature_match ? "signature_detection" : "eicar_test_detection",
+                threat + " | SHA-256 " + hash, file);
         }
 
         if (options.quarantine_matches) {
@@ -292,7 +330,7 @@ void scan_file_impl(
                     destination,
                     file,
                     hash,
-                    match->second,
+                    threat,
                     options.logger);
             } catch (const std::exception& security_error) {
                 auto metadata = destination;
@@ -384,7 +422,7 @@ ScanSummary scan_path(
                 "info", "scan_completed",
                 "Scanned " + std::to_string(summary.files_scanned) +
                     " file(s); " + std::to_string(summary.threats_detected) +
-                    " signature detection(s); " +
+                    " detection(s); " +
                     std::to_string(summary.suspicious_files) +
                     " suspicious file(s).",
                 target);
@@ -439,7 +477,7 @@ ScanSummary scan_path(
             "info", "scan_completed",
             "Scanned " + std::to_string(summary.files_scanned) +
                 " file(s); " + std::to_string(summary.threats_detected) +
-                " signature detection(s); " +
+                " detection(s); " +
                 std::to_string(summary.suspicious_files) +
                 " suspicious file(s).",
             target);

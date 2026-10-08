@@ -14,6 +14,7 @@ add_executable(sentinel-av
     src/behavior.cpp
     src/quick_scan.cpp
     src/hash.cpp
+    src/eicar.cpp
     src/logging.cpp
     src/signatures.cpp
     src/analysis.cpp
@@ -40,6 +41,7 @@ if(BUILD_TESTING)
         src/quick_scan.cpp
         src/config.cpp
         src/hash.cpp
+        src/eicar.cpp
         src/logging.cpp
         src/signatures.cpp
         src/analysis.cpp

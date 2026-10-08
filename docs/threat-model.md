@@ -35,7 +35,7 @@ protect a system.
 | Threat | Current mitigation | Remaining limitation |
 |---|---|---|
 | Malformed signatures or configuration cause unexpected parsing | Strict field/hash format, duplicate and unknown keys rejected | Configuration and signature authenticity are not verified |
-| A signature match is silently moved | Quarantine is opt-in; only exact SHA-256 matches trigger it; local metadata records hash, label, source, and timestamp | Metadata is not cryptographically authenticated; same-volume rename can fail; restore is local and not a malware-cleaning action |
+| A detection is silently moved | Quarantine is opt-in; exact SHA-256 matches and the exact bounded EICAR test pattern can trigger it; local metadata records hash, label, source, and timestamp | EICAR is only a harmless test-pattern check, not general malware detection; metadata is not cryptographically authenticated; same-volume rename can fail; restore is local and not a malware-cleaning action |
 | Other local users read newly quarantined files | New quarantine directories and moved files receive protected ACLs for the current user, SYSTEM, and Administrators | Existing quarantine directory ACLs are not changed; verify the warning and filesystem support |
 | Heuristic false positives are treated as confirmed malware | Heuristic output uses separate `SUSPICIOUS` indicators and transparent rule-based risk scores; heuristics never auto-quarantine | Scores are prioritization only, not probabilities; entropy, file extensions, and PE flags can produce benign findings |
 | IPC exposes a network service | UI launches a local child and uses process streams; no listener is created | Local administrators or the same user can still inspect/control their processes |

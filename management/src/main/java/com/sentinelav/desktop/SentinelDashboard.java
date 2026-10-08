@@ -151,7 +151,7 @@ public final class SentinelDashboard extends Application {
     private final TextField signaturesPath = new TextField(defaultSignaturesPath());
     private final TextField quarantinePath = new TextField();
     private final CheckBox quarantineEnabled = new CheckBox(
-            "Move exact signature matches to quarantine after a scan");
+            "Move detected signature or EICAR test files to quarantine after a scan");
     private final TextArea console = new TextArea();
 
     private final BooleanProperty busy = new SimpleBooleanProperty(false);
@@ -642,7 +642,7 @@ public final class SentinelDashboard extends Application {
         HBox pathRow = new HBox(10, quarantinePath, browse);
         HBox.setHgrow(quarantinePath, Priority.ALWAYS);
         VBox settings = new VBox(12,
-                cardHeader("Quarantine policy", "Applies to exact signature matches only"),
+                cardHeader("Quarantine policy", "Opt-in for signature and EICAR test detections"),
                 quarantineEnabled, pathRow);
         settings.getStyleClass().add("card");
 
@@ -1047,10 +1047,10 @@ public final class SentinelDashboard extends Application {
                     state = ShieldGauge.State.ALERT;
                     chip = "ATTENTION";
                     headline.set("Threats detected");
-                    subline.set(detections.get() + " signature match(es) found. Review them in Activity.");
+                    subline.set(detections.get() + " detection(s) found. Review them in Activity.");
                 } else {
                     headline.set("Scan complete");
-                    subline.set("No signature matches in the scanned files. This is not a safety verdict.");
+                    subline.set("No configured detections in the scanned files. This is not a safety verdict.");
                     chip = "COMPLETE";
                 }
             }

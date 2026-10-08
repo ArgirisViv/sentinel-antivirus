@@ -226,7 +226,7 @@ int main(int argc, char* argv[]) {
                         std::to_string(summary.scan.files_scanned) +
                         " file(s); " +
                         std::to_string(summary.scan.threats_detected) +
-                        " signature detection(s); " +
+                        " detection(s); " +
                         std::to_string(summary.scan.errors) + " error(s).");
             }
             return summary.scan.errors == 0 ? 0 : 1;
@@ -249,7 +249,7 @@ int main(int argc, char* argv[]) {
                 "scan_summary",
                 std::to_string(summary.files_scanned) + " file(s); " +
                     std::to_string(summary.threats_detected) +
-                    " signature detection(s); " +
+                    " detection(s); " +
                     std::to_string(summary.suspicious_files) +
                     " suspicious file(s); " +
                     std::to_string(summary.files_quarantined) +

@@ -4,7 +4,7 @@ param(
 
 # Builds a double-clickable Sentinel AV app (no terminal needed) into dist\SentinelAV\.
 # Requires: JDK 25 (jpackage), the C++ engine already built at build\sentinel-av.exe.
-$ErrorActionPreference = 'Continue'
+$ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+(\.\d+){1,3}$') { throw "Invalid app version: $Version" }
 $root = Split-Path -Parent $PSScriptRoot
 $mgmt = Join-Path $root 'management'
@@ -15,9 +15,10 @@ if (-not (Test-Path $engine)) { throw "Engine not found: $engine. Build the C++ 
 
 Push-Location $mgmt
 try {
-    & .\mvnw.cmd -q package -DskipTests
-    if (-not (Get-ChildItem target\sentinel-management-*.jar)) { throw 'Maven package failed' }
+    & .\mvnw.cmd -q clean package -DskipTests
+    if ($LASTEXITCODE -ne 0) { throw "Maven package failed with exit code $LASTEXITCODE." }
     & .\mvnw.cmd -q dependency:copy-dependencies "-DoutputDirectory=target\libs" -DincludeScope=runtime
+    if ($LASTEXITCODE -ne 0) { throw "Maven dependency copy failed with exit code $LASTEXITCODE." }
     if (-not (Test-Path target\libs)) { throw 'Could not copy dependencies' }
 } finally { Pop-Location }
 
