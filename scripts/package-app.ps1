@@ -1,6 +1,11 @@
+param(
+    [string]$Version = '0.1.0'
+)
+
 # Builds a double-clickable Sentinel AV app (no terminal needed) into dist\SentinelAV\.
 # Requires: JDK 25 (jpackage), the C++ engine already built at build\sentinel-av.exe.
 $ErrorActionPreference = 'Continue'
+if ($Version -notmatch '^\d+(\.\d+){1,3}$') { throw "Invalid app version: $Version" }
 $root = Split-Path -Parent $PSScriptRoot
 $mgmt = Join-Path $root 'management'
 $dist = Join-Path $root 'dist'
@@ -32,7 +37,7 @@ foreach ($f in 'signatures.example.txt', 'config.example.ini') {
 $icon = Join-Path $PSScriptRoot 'sentinel.ico'
 $mainJar = (Get-ChildItem $stage -Filter 'sentinel-management-*.jar' | Select-Object -First 1).Name
 
-& jpackage --type app-image --name SentinelAV --app-version 0.1.0 `
+& jpackage --type app-image --name SentinelAV --app-version $Version `
     --input $stage --main-jar $mainJar --main-class com.sentinelav.desktop.SentinelDashboard `
     --java-options '--module-path $APPDIR --add-modules javafx.controls' `
     --icon $icon --app-content $content --dest $dist --vendor 'Sentinel AV'

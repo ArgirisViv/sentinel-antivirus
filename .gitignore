@@ -3,5 +3,6 @@
 /quarantine/
 /logs/
 /management/target/
-
 dist/
+/.vscode/
+/.github/modernize/

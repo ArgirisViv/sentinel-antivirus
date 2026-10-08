@@ -6,53 +6,46 @@
 
 <p align="center">
   <strong>A Windows endpoint-security prototype built with C++17 and JavaFX.</strong><br>
-  Native file scanning, explainable static indicators, best-effort monitoring, and a polished local desktop console.
+  Local scanning, explainable static indicators, best-effort monitoring, and a native desktop console.
 </p>
 
 <p align="center">
   <a href="https://github.com/ArgirisViv/sentinel-antivirus/actions/workflows/ci.yml">
-    <img src="https://github.com/ArgirisViv/sentinel-antivirus/actions/workflows/ci.yml/badge.svg?branch=main" alt="Windows CI status">
+    <img src="https://github.com/ArgirisViv/sentinel-antivirus/actions/workflows/ci.yml/badge.svg?branch=main" alt="Windows CI">
   </a>
   <img src="https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus" alt="C++17">
   <img src="https://img.shields.io/badge/UI-JavaFX-4A90D9" alt="JavaFX">
   <img src="https://img.shields.io/badge/platform-Windows-0078D4?logo=windows" alt="Windows">
 </p>
 
-> **Scope:** This is an educational portfolio project, not production antivirus
-> software. Detection and monitoring are best-effort; the app does not provide
-> always-on protection or block threats.
+> **Honest scope:** Sentinel AV is an educational prototype, not production
+> antivirus software. Scanning and monitoring are best-effort; it does not
+> block threats or provide always-on protection.
 
-## Product preview
-
-<p align="center">
-  <img src="docs/images/dashboard.png" alt="Sentinel AV desktop dashboard" width="88%">
-</p>
-<p align="center"><em>JavaFX security console with local scan controls, activity, and quarantine management.</em></p>
+## Preview
 
 <p align="center">
-  <img src="docs/images/startup-splash.png" alt="Sentinel AV animated startup screen" width="72%">
+  <img src="docs/images/demo.gif" alt="Sentinel AV animated desktop preview" width="88%">
 </p>
-<p align="center"><em>Custom animated startup screen and cybersecurity-inspired visual identity.</em></p>
 
-## What this project demonstrates
+## Highlights
 
-- **Native Windows engineering:** C++17, Windows CNG SHA-256, filesystem
-  notifications, process snapshots, and careful resource/error handling.
-- **Detection clarity:** exact local signature matches are distinct from
-  explainable static heuristics; risk scores are prioritization signals, not
-  probabilities or proof of malware.
-- **Safer quarantine workflow:** opt-in movement of exact matches, restricted
-  ACLs on newly created quarantine locations, local metadata, and hash-checked
-  restore.
-- **Desktop integration:** JavaFX starts and supervises the local scanner as a
-  child process, streams its output, and presents scan and quarantine controls.
-- **Verification and documentation:** Windows CI, C++ and Java tests, an
-  architecture overview, and a scoped threat model.
+- Native Windows C++17 scanner using Windows CNG SHA-256 and a strict, local
+  signature database.
+- Separates exact signature matches from explainable static indicators; risk
+  scores are prioritization signals, not probabilities.
+- Optional quarantine for exact matches, with restricted ACLs on newly created
+  locations, local history, and hash-checked restore.
+- Best-effort recursive file monitoring, process-start snapshots, and
+  alert-only file-change burst heuristic.
+- JavaFX desktop console supervises the local engine process and streams its
+  output; no network listener or cloud service.
+- Windows CI, automated C++/Java tests, a threat model, and architecture docs.
 
-## Quick start
+## Try it on Windows
 
-Requirements: Windows, CMake 3.16+, and a C++17 compiler (Visual Studio Build
-Tools or another supported Windows toolchain).
+Requirements: CMake 3.16+ and a C++17 Windows compiler (for example Visual
+Studio Build Tools).
 
 ```powershell
 cmake -S . -B build
@@ -61,343 +54,39 @@ ctest --test-dir build -C Release --output-on-failure
 .\scripts\demo-safe.ps1
 ```
 
-The safe demo creates harmless text fixtures in a temporary directory,
-demonstrates report-only scanning and explicit quarantine of the example `abc`
-test vector, then cleans up. The example hash is **not a malware signature**.
+The demo uses harmless text fixtures, including the well-known `abc` hash
+vector, in a temporary directory. It demonstrates report-only scanning and
+explicit quarantine, then removes its files. The EICAR test string is used
+only by the separate, opt-in [EICAR demo](scripts/demo-eicar.ps1); it is not
+bundled as a signature or specially detected by the scanner. Other antivirus
+products may flag or quarantine that standard test file.
 
-## Scanner examples
+## Run the desktop app
 
-The C++ engine uses Windows CNG (`bcrypt.dll`) for SHA-256; no third-party
-runtime packages are required.
+Download the **Windows x64 ZIP** from [GitHub Releases](https://github.com/ArgirisViv/sentinel-antivirus/releases/latest),
+extract the complete folder, and launch `SentinelAV.exe`. No separate Java
+installation is needed for the packaged app.
 
-The example database contains only the SHA-256 of the harmless text `abc`.
-It is included to verify the scanner pipeline and is **not a malware signature**.
-
-```powershell
-[System.IO.File]::WriteAllText("$PWD\safe-test.txt", "abc")
-.\build\Release\sentinel-av.exe scan .\safe-test.txt --signatures .\signatures.example.txt
-```
-
-For a single-config generator, the executable may be at `build\sentinel-av.exe`.
-
-An optional key/value configuration file supplies defaults:
-
-```powershell
-.\build\Release\sentinel-av.exe scan .\safe-test.txt `
-  --config .\config.example.ini
-```
-
-Supported keys are `signatures`, `log_file`, and `quarantine_directory`.
-Relative values resolve from the configuration file's directory. Unknown or
-duplicate keys are errors. Command-line `--signatures` and `--log` values
-override the configuration. `--quarantine [directory]` remains opt-in; without
-a directory argument it uses `quarantine_directory` from the config.
-
-Quick Scan checks the current user's Downloads folder, temporary directory,
-and Startup folder:
-
-```powershell
-.\build\Release\sentinel-av.exe quick-scan `
-  --signatures .\signatures.example.txt
-```
-
-Missing optional locations are reported as skipped; discovery or access errors
-are reported in the summary and produce a nonzero exit status. Quick Scan does
-not scan all of AppData or active process images. As with other scans, it only
-reports detections unless exact-signature quarantine is explicitly enabled.
-
-When `log_file` is configured, the engine appends structured JSON Lines events
-with UTC timestamps, severity, event name, message, and path. The active log is
-rotated at 10 MiB, keeping one `.1` backup. Log write failures are reported
-instead of silently ignored.
-
-To move a detected test file into quarantine, opt in explicitly:
-
-```powershell
-.\build\Release\sentinel-av.exe scan .\safe-test.txt `
-  --signatures .\signatures.example.txt --quarantine .\quarantine
-```
-
-To monitor a directory recursively, start the watcher and create or modify a
-file in the watched directory from another terminal:
-
-```powershell
-.\build\Release\sentinel-av.exe watch .\watched `
-  --signatures .\signatures.example.txt
-```
-
-The monitor processes added, modified, and renamed-in files after their size
-and last-write time remain stable. It skips symbolic links and directories.
-It does not scan files that already existed when monitoring started; run `scan`
-first for a baseline. Press Ctrl+C to stop. If Windows reports
-notification-buffer overflow, the monitor exits with an error; run a full
-`scan` to cover any missed changes. Real-time monitoring is best-effort and is
-not a security boundary.
-
-To monitor new processes:
-
-```powershell
-.\build\Release\sentinel-av.exe processes `
-  --signatures .\signatures.example.txt
-```
-
-The process monitor polls Windows process snapshots once per second. It records
-the currently running processes as a baseline and reports later process starts,
-then scans each accessible executable image against the local signatures.
-Processes already running at startup are not scanned. Windows may deny access
-to protected or elevated processes; these are reported and their image scan is
-skipped. This polling approach can miss very short-lived processes. It reports
-detections only and does not terminate processes.
-
-To inspect the current process ancestry as a point-in-time snapshot:
-
-```powershell
-.\build\Release\sentinel-av.exe process-tree `
-  --config .\config.example.ini
-```
-
-The process tree shows PID, parent PID, and executable name. It is an
-unprivileged snapshot, not continuous telemetry; it does not inspect memory,
-network activity, loaded DLLs, or terminate processes.
-
-Quarantine uses a same-volume rename and does not execute or inspect files
-behaviorally. On Windows, newly-created quarantine directories and quarantined
-files receive protected ACLs for the current user, LocalSystem, and local
-Administrators. Existing quarantine-directory ACLs are not modified and trigger
-a warning; verify them before use. The directory must not be the scan target or
-one of its parents. Use a quarantine directory on the same volume as the file
-being moved. Each moved item receives local metadata containing its SHA-256,
-signature label, original path, and UTC timestamp. The Java dashboard can list
-these entries and restore a selected item. Restore refuses to overwrite an
-existing path and requires the original parent directory to remain available.
-The content hash is rechecked before restore. The metadata is local and is not
-cryptographically authenticated; protect the quarantine directory and review
-the source before restoring.
-
-Quarantine history can also be inspected or restored from the CLI:
-
-```powershell
-.\build\Release\sentinel-av.exe quarantine list `
-  --config .\config.example.ini
-.\build\Release\sentinel-av.exe quarantine restore <id> `
-  --config .\config.example.ini
-```
-
-During manual folder monitoring, Sentinel reports a ransomware-like burst
-alert when 32 distinct observed file paths change within 10 seconds. This is a
-coarse, alert-only heuristic: it cannot attribute writes to a process, may
-produce false positives, and does not stop the process or roll back files.
-Filesystem notifications can be missed or overflow; this is not ransomware
-prevention.
-
-## JavaFX management dashboard
-
-The Java desktop dashboard launches the C++ executable as a child process and
-communicates through its command-line arguments and private parent/child
-standard-output pipes (`ProcessBuilder`). It does not use a TCP listener, named
-pipe server, or network port; command arguments are passed directly without a
-shell.
-
-Requirements: JDK 25+. Build the C++ engine first using the instructions above,
-then run the Java tests or launch the dashboard:
-
-```powershell
-Set-Location .\management
-.\mvnw.cmd test
-.\mvnw.cmd javafx:run
-```
-
-The checked-in Maven Wrapper downloads the pinned Apache Maven distribution on
-first use; no system-wide Maven installation is required.
-
-The dashboard includes a branded startup screen, animated cybersecurity
-background, and a dark graphite interface with teal accents. Its pages are:
-
-- **Dashboard:** scan status, recent activity, and quick actions.
-- **Scanner:** start a Quick Scan, select a folder or file, and follow live
-  engine output. Quick Scan checks the current user's Downloads, temporary,
-  and Startup folders. Missing locations are skipped and reported;
-  inaccessible locations produce errors. It does not scan all of AppData or
-  active process images.
-- **Monitoring:** start and stop the optional folder and process monitoring.
-  Monitoring is best-effort and only runs after you start it.
-- **Activity:** review engine output and events for the current app session;
-  the Java dashboard does not persist a threat database.
-- **Quarantine:** configures opt-in movement of exact signature matches. The
-  dashboard provides local history and a restore action; it does not delete
-  quarantined files.
-- **Settings:** configure engine, signatures, and optional configuration paths.
-
-Summary counters reflect the current scan/session, not lifetime totals. The
-status banner says the device is ready or shows the current scan/engine state;
-it does not claim that the device is safe or continuously protected. There is
-no always-on protection, signature updater, VPN, firewall, privacy module, or
-support service in this prototype. Engine paths, signatures, and optional
-configuration are in Settings. The engine path defaults to
-`build\Release\sentinel-av.exe` or `build\sentinel-av.exe` when present.
-
-The dashboard can run one engine command at a time, show live output, and keep
-a short in-memory event history for the current session. Monitoring is
-user-started and best-effort; it is not always-on protection. Stop or closing
-the dashboard stops the Sentinel AV child process and does not terminate
-processes being monitored.
-
-The Java EngineClient tests cover child-process output capture, exit codes,
-exclusive engine operation, stop requests, and missing-executable errors.
-
-### Launch without a terminal (Windows)
-
-To create a double-clickable app image with a bundled Java runtime, JDK 25+
-(including `jpackage`) is required. First build the C++ engine. The packaging
-script expects it at `build\sentinel-av.exe`; if a multi-configuration CMake
-generator placed it at `build\Release\sentinel-av.exe`, copy it into that
-expected location:
+To build it yourself, install JDK 25+ with `jpackage`, build the C++ engine,
+then run:
 
 ```powershell
 Copy-Item .\build\Release\sentinel-av.exe .\build\sentinel-av.exe
 .\scripts\package-app.ps1
 ```
 
-The launcher is created at `dist\SentinelAV\SentinelAV.exe`. Open that file or
-create a Windows shortcut to it; keep the complete `dist\SentinelAV` folder
-together because it contains the application runtime and bundled engine. The
-generated `dist` directory is ignored by Git. Re-run the packaging script after
-changing the dashboard or rebuilding the engine. This creates an app image,
-not a Setup installer.
+The app image is written to `dist\SentinelAV`. Keep its folder contents
+together.
 
-## Docker
+## Documentation
 
-The [Dockerfile](Dockerfile) works with the default Linux-container mode of
-Docker Desktop. Because the engine uses Windows APIs, the image cross-compiles
-it to `sentinel-av.exe` with MinGW-w64 and runs it under Wine. The C++ tests run
-during the image build, also under Wine. Wine is an emulation layer, so use the
-image to build, test, and demonstrate the scanner; native Windows remains the
-reference platform. The JavaFX window is a desktop application and is not run in
-a container. Use the packaged Windows app above for the graphical dashboard;
-Docker is for the scanner engine and its mounted-volume demonstrations.
+- [Usage and CLI reference](docs/usage.md)
+- [Architecture](docs/architecture.md)
+- [Threat model and limitations](docs/threat-model.md)
 
-```powershell
-# Build the image (cross-compiles the engine and runs the C++ tests)
-docker build -t sentinel-av .
+## Future work
 
-# Scan a host folder, mounted read-only, with the example signatures
-docker run --rm -v C:\path\to\scan:/data:ro sentinel-av `
-  scan /data --signatures /sentinel/signatures.example.txt
-
-# Run the Java management unit tests (JDK 25)
-docker build --target management-test .
-```
-
-The container scans only files that are mounted into it. It does not see the
-host's files or processes, so process monitoring there is not meaningful.
-
-### Always-running monitor container
-
-`docker compose up -d --build` starts a `sentinel-monitor` container that stays
-visible under **Containers** in Docker Desktop and runs the engine's `watch`
-command on a Docker volume (`/data`). Monitoring is best-effort and covers only
-that volume. Drop a harmless test file in and read the result in the container
-logs:
-
-```powershell
-Set-Content -NoNewline -Path $env:TEMP\safe.txt -Value abc
-docker cp $env:TEMP\safe.txt sentinel-monitor:/data/safe.txt
-docker logs sentinel-monitor
-docker compose down        # stop it (add -v to also delete the volume)
-```
-
-A named volume is used because Docker Desktop does not forward file-change
-events from Windows bind mounts into Linux containers, so files created
-directly in a host folder would not be noticed.
-
-## Signature database
-
-The default database path is `signatures.txt`; create it from the example or
-specify another file with `--signatures`. Each non-comment line must have this
-format:
-
-```text
-<64 hexadecimal SHA-256 characters><TAB><non-empty label>
-```
-
-Blank lines and lines beginning with `#` are ignored. Invalid and duplicate
-hashes are reported as errors; matching is exact and case-insensitive.
-
-## Portfolio materials
-
-- [Architecture overview](docs/architecture.md)
-- [Threat model](docs/threat-model.md)
-- [Safe demo script](scripts/demo-safe.ps1)
-
-The demo script creates only harmless text files in a temporary directory,
-scans them, demonstrates explicit quarantine of the `abc` test vector, and
-removes its temporary files afterward.
-
-GitHub Actions CI is defined in `.github/workflows/ci.yml`; it builds and runs
-the C++ tests on Windows and runs the Java tests.
-
-## Static analysis indicators
-
-The scanner reports SHA-256 matches as `[DETECTED]`. Separate `[SUSPICIOUS]`
-indicators are heuristic context only and are never treated as signature
-detections or automatically quarantined:
-
-- Active/script-oriented extensions and executable names with selected
-  document/image double extensions
-- Shannon byte entropy of the first 1 MiB, only for samples at least 4 KiB,
-  with an indicator threshold of 7.2 bits per byte
-- PE header metadata (architecture and section count), malformed/truncated PE
-  headers, unusual section counts, unknown architecture, and sections marked
-  both writable and executable
-- Process executable images located beneath the current user's temporary,
-  Downloads, or local AppData directories
-
-These signals are intentionally conservative and can flag legitimate software,
-scripts, installers, compressed, or encrypted files. PE parsing reads metadata
-only; files are never loaded or executed by the analyzer. This is not behavioral
-analysis and does not establish that a file is malicious.
-
-## Explainable risk classification
-
-Files with configured indicators emit a `[RISK]` record containing an integer
-score, severity, broad evidence category, confidence basis, and the reasons
-that contributed. The score is a **rule-based prioritization value, not a
-probability or a claim that a file is malware**. Correlated findings in the
-same category contribute only their strongest weight; distinct categories can
-combine. Current weights are: active-content extension (5), high entropy (15),
-executable masquerading (25), suspicious PE structure (up to 30), a
-PE-like extension on a non-PE file (35), and malformed PE headers (45),
-capped at 99.
-
-Heuristic severities are `LOW` (1–19), `MEDIUM` (20–39), `HIGH` (40–69), and
-`CRITICAL` (70–99). A score of 0 means only that no configured indicator fired;
-it is not a safety verdict. An exact hash hit is separately reported as
-`SIGNATURE_MATCH` with score 100. It means only that the hash matches the
-configured local database; database contents and labels are not independently
-authenticated, and are not verified malware-family or cloud-reputation data.
-
-## Current scope
-
-- Recursive file traversal without following symbolic links
-- SHA-256 through Windows CNG
-- Strict local hash-signature database
-- Detection reporting and opt-in quarantine by rename
-- Recursive real-time monitoring of added, modified, and renamed-in files
-- Alert-only ransomware-like burst heuristic for 32 distinct observed paths
-  within 10 seconds (no process attribution, blocking, or rollback)
-- Process-start monitoring and executable signature scans
-- Point-in-time process ancestry snapshot
-- Local quarantine metadata, history listing, and no-overwrite restore
-- Static entropy, extension, and PE metadata indicators
-- Strict key/value engine configuration with config-relative paths
-- Structured, rotating JSONL event logging
-- Restricted ACLs on event logs and quarantined files; new quarantine
-  directories are ACL-hardened
-- Local parent/child pipe communication without a network listener
-- Non-zero exit status on scan errors or invalid invocation
-
-A Windows service, kernel minifilter, pre-execution blocking, authenticated
-signature updates, process-attributed behavior, network/web protection,
-cloud reputation, ML, and rollback are not implemented. Sentinel remains an
-educational local prototype, not a replacement for Windows Security or a
-production antivirus.
+Potential engineering follow-ups include broader benign-corpus validation,
+parser fuzzing, measured scan-performance baselines, and stronger UI-level
+automated tests. These are proposed improvements, not implemented product
+claims.
