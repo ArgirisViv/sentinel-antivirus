@@ -1,3 +1,5 @@
+# This opt-in demo creates a standard antivirus test file that security
+# products may automatically quarantine or remove.
 param(
     [switch]$RunEicarTest,
     [string]$Engine = ".\build\Release\sentinel-av.exe"
@@ -19,12 +21,18 @@ New-Item -ItemType Directory -Path $demoRoot | Out-Null
 try {
     $payload = 'X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*'
     [System.IO.File]::WriteAllBytes($fixture, [System.Text.Encoding]::ASCII.GetBytes($payload))
+    if (-not (Test-Path -LiteralPath $fixture -PathType Leaf)) {
+        throw "The EICAR test file is no longer present. Windows Security or another antivirus may have quarantined it. Run this opt-in demo only in a disposable environment intended for antivirus testing; do not disable protection on your everyday device."
+    }
     [System.IO.File]::WriteAllText($signatures, '')
 
     Write-Output "Scanning the harmless EICAR test string with an empty signature database:"
     $output = & $enginePath scan $fixture --signatures $signatures 2>&1
     $exitCode = $LASTEXITCODE
     $output | ForEach-Object { Write-Output $_ }
+    if (-not (Test-Path -LiteralPath $fixture -PathType Leaf)) {
+        throw "The EICAR test file disappeared during scanning. Windows Security or another antivirus may have quarantined it, so the demo could not complete. Use a disposable environment intended for antivirus testing; do not disable protection on your everyday device."
+    }
     if ($exitCode -ne 0) {
         throw "Scanner exited with code $exitCode."
     }

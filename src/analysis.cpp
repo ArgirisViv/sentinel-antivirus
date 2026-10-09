@@ -441,7 +441,8 @@ FileAnalysis analyze_file(const std::filesystem::path& file) {
 
 RiskAssessment assess_file_risk(
     const FileAnalysis& analysis,
-    bool exact_signature_match) {
+    bool exact_signature_match,
+    bool exact_eicar_test_pattern_match) {
     RiskAssessment assessment;
     if (exact_signature_match) {
         assessment.score = 100;
@@ -451,6 +452,16 @@ RiskAssessment assess_file_risk(
         assessment.reasons.emplace_back(
             "SHA-256 exactly matches an entry in the configured local database; "
             "the database entry is not independently authenticated.");
+        return assessment;
+    }
+    if (exact_eicar_test_pattern_match) {
+        assessment.score = 100;
+        assessment.severity = "BUILTIN_TEST_PATTERN";
+        assessment.category = "builtin_test_pattern";
+        assessment.confidence = "exact_builtin_test_pattern_match";
+        assessment.reasons.emplace_back(
+            "Exact EICAR standard test string matched; this is a harmless "
+            "antivirus test pattern, not malware.");
         return assessment;
     }
 

@@ -331,6 +331,9 @@ it is not a safety verdict. An exact hash hit is separately reported as
 `SIGNATURE_MATCH` with score 100. It means only that the hash matches the
 configured local database; database contents and labels are not independently
 authenticated, and are not verified malware-family or cloud-reputation data.
+An exact built-in EICAR test-pattern match is also reported at score 100 with
+severity `BUILTIN_TEST_PATTERN` and category `builtin_test_pattern`; this is a
+harmless test-file classification, not a malware-risk judgment.
 
 ## Current scope
 

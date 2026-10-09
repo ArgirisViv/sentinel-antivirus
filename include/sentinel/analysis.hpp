@@ -45,7 +45,8 @@ FileAnalysis analyze_file(const std::filesystem::path& file);
 
 RiskAssessment assess_file_risk(
     const FileAnalysis& analysis,
-    bool exact_signature_match);
+    bool exact_signature_match,
+    bool exact_eicar_test_pattern_match = false);
 
 std::vector<std::string> analyze_process_image_path(
     const std::filesystem::path& image_path);

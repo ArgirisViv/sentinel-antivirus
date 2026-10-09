@@ -263,9 +263,25 @@ void scan_file_impl(
         ++summary.files_scanned;
         const auto match = signatures.find(hash);
         const bool signature_match = match != signatures.end();
-        const bool eicar_match = matches_eicar_test_file(file);
+        bool eicar_match = false;
+        try {
+            eicar_match = matches_eicar_test_file(file);
+        } catch (const std::exception& error) {
+            if (!signature_match) {
+                throw;
+            }
+            ++summary.errors;
+            const std::string message =
+                "Could not inspect file for EICAR test detection after finding "
+                "a signature match: " + std::string(error.what());
+            std::cerr << "[ERROR] " << message << '\n';
+            if (options.logger != nullptr) {
+                options.logger->write(
+                    "error", "eicar_test_detection_error", message, file);
+            }
+        }
         const auto risk = assess_file_risk(
-            analysis, signature_match);
+            analysis, signature_match, eicar_match);
         if (risk.score > summary.highest_risk_score) {
             summary.highest_risk_score = risk.score;
             summary.highest_risk_severity = risk.severity;

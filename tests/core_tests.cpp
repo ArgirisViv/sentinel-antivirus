@@ -553,6 +553,27 @@ void test_risk_assessment_is_not_a_safety_verdict() {
             signature.confidence ==
                 "exact_local_hash_match_database_authenticity_unverified",
         "Exact database match did not remain distinct from heuristic severity.");
+
+    const auto eicar = sentinel::assess_file_risk(clean, false, true);
+    require(
+        eicar.score == 100 &&
+            eicar.severity == "BUILTIN_TEST_PATTERN" &&
+            eicar.category == "builtin_test_pattern" &&
+            eicar.confidence == "exact_builtin_test_pattern_match",
+        "Exact EICAR test pattern did not receive its distinct risk classification.");
+    require(
+        eicar.reasons.size() == 1 &&
+            eicar.reasons.front().find(
+                "harmless antivirus test pattern, not malware") !=
+                std::string::npos,
+        "EICAR risk reason did not identify the harmless test pattern.");
+
+    const auto signature_and_eicar =
+        sentinel::assess_file_risk(clean, true, true);
+    require(
+        signature_and_eicar.severity == "SIGNATURE_MATCH" &&
+            signature_and_eicar.category == "local_signature_match",
+        "An exact signature match should take precedence over EICAR classification.");
 }
 
 void test_process_location_heuristic() {
