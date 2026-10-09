@@ -302,7 +302,10 @@ void scan_file_impl(
                       << " | reasons=" << reasons.str() << '\n';
             if (options.logger != nullptr) {
                 options.logger->write(
-                    risk.severity == "SIGNATURE_MATCH" ? "alert" : "warning",
+                    risk.severity == "SIGNATURE_MATCH" ||
+                            risk.severity == "BUILTIN_TEST_PATTERN"
+                        ? "alert"
+                        : "warning",
                     "file_risk_assessment",
                     "score=" + std::to_string(risk.score) +
                         "; severity=" + risk.severity +
